@@ -1,8 +1,8 @@
 {
-  "name": "Board UI Kit",
-  "id": "board-ui-kit-local",
+  "name": "Board UI Kit v6",
+  "id": "board-ui-kit-v6",
   "api": "1.0.0",
-  "main": "code.js",
+  "main": "board-ui-kit-v6.js",
   "editorType": ["figma"],
   "documentAccess": "dynamic-page",
   "networkAccess": { "allowedDomains": ["none"] }

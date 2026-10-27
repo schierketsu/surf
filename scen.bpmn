@@ -1,0 +1,987 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI" xmlns:dc="http://www.omg.org/spec/DD/20100524/DC" xmlns:di="http://www.omg.org/spec/DD/20100524/DI" id="Definitions_Board" targetNamespace="http://bpmn.io/schema/bpmn" exporter="Claude" exporterVersion="1.0">
+  <bpmn:collaboration id="Collaboration_Board">
+    <bpmn:participant id="Pool_Main" name="Доска в СППР — основной сценарий: создание из меню" processRef="Process_Main" />
+    <bpmn:participant id="Pool_Alt" name="Доска в СППР — альтернативный сценарий: вместе с КС из Оповещатора" processRef="Process_Alt" />
+  </bpmn:collaboration>
+  <bpmn:process id="Process_Main" isExecutable="false">
+    <bpmn:laneSet id="Process_Main_lanes">
+      <bpmn:lane id="Lane_Duty" name="Дежурный">
+        <bpmn:flowNodeRef>M_Start</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>M_OpenMenu</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>M_Choice</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>M_ClickNew</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>M_PickHistory</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>M_Rename</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>M_Settings</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>M_ShareLink</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>M_MergeOpen</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>M_Split</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>M_Manage</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>M_Join</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>M_Finish</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>M_Pause</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>M_Delete</bpmn:flowNodeRef>
+      </bpmn:lane>
+      <bpmn:lane id="Lane_Board" name="Система «Доска»">
+        <bpmn:flowNodeRef>M_CheckRole</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>M_HasRole</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>M_Disabled</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>M_ShowPage</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>M_Create</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>M_IsActive</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>M_OpenFull</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>M_OpenView</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>M_ViewEnd</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>M_HowJoined</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>M_RightsAnon</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>M_RightsUser</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>M_RightsDuty</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>M_MergeRights</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>M_ReadOnly</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>M_Paused</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>M_IsOwner</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>M_DoDelete</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>M_Deleted</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>M_NoDelete</bpmn:flowNodeRef>
+      </bpmn:lane>
+      <bpmn:lane id="Lane_User" name="Пользователь">
+        <bpmn:flowNodeRef>M_OpenLink</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>M_Work</bpmn:flowNodeRef>
+      </bpmn:lane>
+      <bpmn:lane id="Lane_Admin" name="Администратор">
+        <bpmn:flowNodeRef>M_GrantRole</bpmn:flowNodeRef>
+      </bpmn:lane>
+    </bpmn:laneSet>
+    <bpmn:startEvent id="M_Start" name="Сотрудник открывает СППР">
+      <bpmn:outgoing>MF_01</bpmn:outgoing>
+    </bpmn:startEvent>
+    <bpmn:serviceTask id="M_CheckRole" name="Проверить роль сотрудника">
+      <bpmn:incoming>MF_01</bpmn:incoming>
+      <bpmn:incoming>MF_06</bpmn:incoming>
+      <bpmn:outgoing>MF_02</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:exclusiveGateway id="M_HasRole" name="Роль «Дежурный» или «Администратор»?">
+      <bpmn:incoming>MF_02</bpmn:incoming>
+      <bpmn:outgoing>MF_03</bpmn:outgoing>
+      <bpmn:outgoing>MF_04</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:serviceTask id="M_Disabled" name="Показать пункт «Доска» в меню неактивным">
+      <bpmn:incoming>MF_04</bpmn:incoming>
+      <bpmn:outgoing>MF_05</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:userTask id="M_GrantRole" name="Выдать сотруднику роль «Дежурный» по запросу">
+      <bpmn:incoming>MF_05</bpmn:incoming>
+      <bpmn:outgoing>MF_06</bpmn:outgoing>
+    </bpmn:userTask>
+    <bpmn:userTask id="M_OpenMenu" name="Нажать «Доска» в левом меню (под «Аварии»)">
+      <bpmn:incoming>MF_03</bpmn:incoming>
+      <bpmn:outgoing>MF_07</bpmn:outgoing>
+    </bpmn:userTask>
+    <bpmn:serviceTask id="M_ShowPage" name="Открыть страницу «Доска»: кнопка «Новая доска» и история досок">
+      <bpmn:incoming>MF_07</bpmn:incoming>
+      <bpmn:outgoing>MF_08</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:exclusiveGateway id="M_Choice" name="Новая доска или из истории?">
+      <bpmn:incoming>MF_08</bpmn:incoming>
+      <bpmn:outgoing>MF_09</bpmn:outgoing>
+      <bpmn:outgoing>MF_10</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:userTask id="M_ClickNew" name="Нажать «Новая доска»">
+      <bpmn:incoming>MF_09</bpmn:incoming>
+      <bpmn:outgoing>MF_11</bpmn:outgoing>
+    </bpmn:userTask>
+    <bpmn:userTask id="M_PickHistory" name="Выбрать доску в истории">
+      <bpmn:incoming>MF_10</bpmn:incoming>
+      <bpmn:outgoing>MF_12</bpmn:outgoing>
+    </bpmn:userTask>
+    <bpmn:serviceTask id="M_Create" name="Создать пустую доску «Без названия» с уникальным ID; владелец — дежурный">
+      <bpmn:incoming>MF_11</bpmn:incoming>
+      <bpmn:outgoing>MF_13</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:exclusiveGateway id="M_IsActive" name="Доска активна?">
+      <bpmn:incoming>MF_12</bpmn:incoming>
+      <bpmn:outgoing>MF_14</bpmn:outgoing>
+      <bpmn:outgoing>MF_15</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:userTask id="M_Rename" name="Задать название в шапке (обычно INC-номер)">
+      <bpmn:incoming>MF_13</bpmn:incoming>
+      <bpmn:outgoing>MF_17</bpmn:outgoing>
+    </bpmn:userTask>
+    <bpmn:serviceTask id="M_OpenFull" name="Открыть доску с правами дежурного">
+      <bpmn:incoming>MF_14</bpmn:incoming>
+      <bpmn:outgoing>MF_20</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:serviceTask id="M_OpenView" name="Открыть доску только для просмотра записей">
+      <bpmn:incoming>MF_15</bpmn:incoming>
+      <bpmn:outgoing>MF_16</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:userTask id="M_Settings" name="При необходимости сменить права по умолчанию в настройках доски">
+      <bpmn:incoming>MF_17</bpmn:incoming>
+      <bpmn:outgoing>MF_18</bpmn:outgoing>
+    </bpmn:userTask>
+    <bpmn:endEvent id="M_ViewEnd" name="Записи просмотрены">
+      <bpmn:incoming>MF_16</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:userTask id="M_ShareLink" name="Скопировать ссылку на доску и отправить в чат КС">
+      <bpmn:incoming>MF_18</bpmn:incoming>
+      <bpmn:outgoing>MF_19</bpmn:outgoing>
+    </bpmn:userTask>
+    <bpmn:exclusiveGateway id="M_MergeOpen">
+      <bpmn:incoming>MF_19</bpmn:incoming>
+      <bpmn:incoming>MF_20</bpmn:incoming>
+      <bpmn:outgoing>MF_21</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:parallelGateway id="M_Split">
+      <bpmn:incoming>MF_21</bpmn:incoming>
+      <bpmn:outgoing>MF_22</bpmn:outgoing>
+      <bpmn:outgoing>MF_23</bpmn:outgoing>
+    </bpmn:parallelGateway>
+    <bpmn:userTask id="M_Manage" name="Вести обсуждение: менять права участников в списке, удалять участников">
+      <bpmn:incoming>MF_22</bpmn:incoming>
+      <bpmn:outgoing>MF_33</bpmn:outgoing>
+    </bpmn:userTask>
+    <bpmn:userTask id="M_OpenLink" name="Открыть ссылку на доску">
+      <bpmn:incoming>MF_23</bpmn:incoming>
+      <bpmn:outgoing>MF_24</bpmn:outgoing>
+    </bpmn:userTask>
+    <bpmn:exclusiveGateway id="M_HowJoined" name="Как вошёл участник?">
+      <bpmn:incoming>MF_24</bpmn:incoming>
+      <bpmn:outgoing>MF_25</bpmn:outgoing>
+      <bpmn:outgoing>MF_26</bpmn:outgoing>
+      <bpmn:outgoing>MF_27</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:serviceTask id="M_RightsAnon" name="Аноним без входа: только чтение">
+      <bpmn:incoming>MF_25</bpmn:incoming>
+      <bpmn:outgoing>MF_28</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:serviceTask id="M_RightsUser" name="Пользователь с корп. учёткой: права по умолчанию из настроек">
+      <bpmn:incoming>MF_26</bpmn:incoming>
+      <bpmn:outgoing>MF_29</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:serviceTask id="M_RightsDuty" name="Дежурный или администратор: полное управление доской">
+      <bpmn:incoming>MF_27</bpmn:incoming>
+      <bpmn:outgoing>MF_30</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:exclusiveGateway id="M_MergeRights">
+      <bpmn:incoming>MF_28</bpmn:incoming>
+      <bpmn:incoming>MF_29</bpmn:incoming>
+      <bpmn:incoming>MF_30</bpmn:incoming>
+      <bpmn:outgoing>MF_31</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:userTask id="M_Work" name="Работать на доске: смотреть или редактировать">
+      <bpmn:incoming>MF_31</bpmn:incoming>
+      <bpmn:outgoing>MF_32</bpmn:outgoing>
+    </bpmn:userTask>
+    <bpmn:parallelGateway id="M_Join">
+      <bpmn:incoming>MF_32</bpmn:incoming>
+      <bpmn:incoming>MF_33</bpmn:incoming>
+      <bpmn:outgoing>MF_34</bpmn:outgoing>
+    </bpmn:parallelGateway>
+    <bpmn:exclusiveGateway id="M_Finish" name="Как завершить работу?">
+      <bpmn:incoming>MF_34</bpmn:incoming>
+      <bpmn:outgoing>MF_35</bpmn:outgoing>
+      <bpmn:outgoing>MF_36</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:userTask id="M_Pause" name="Приостановить доску (может любой дежурный)">
+      <bpmn:incoming>MF_35</bpmn:incoming>
+      <bpmn:outgoing>MF_37</bpmn:outgoing>
+    </bpmn:userTask>
+    <bpmn:serviceTask id="M_ReadOnly" name="Перевести доску в «только чтение»; она остаётся в истории">
+      <bpmn:incoming>MF_37</bpmn:incoming>
+      <bpmn:outgoing>MF_38</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:endEvent id="M_Paused" name="Доска приостановлена">
+      <bpmn:incoming>MF_38</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:userTask id="M_Delete" name="Удалить доску">
+      <bpmn:incoming>MF_36</bpmn:incoming>
+      <bpmn:outgoing>MF_39</bpmn:outgoing>
+    </bpmn:userTask>
+    <bpmn:exclusiveGateway id="M_IsOwner" name="Владелец доски или администратор?">
+      <bpmn:incoming>MF_39</bpmn:incoming>
+      <bpmn:outgoing>MF_40</bpmn:outgoing>
+      <bpmn:outgoing>MF_41</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:serviceTask id="M_DoDelete" name="Удалить доску и закрыть доступ по ссылке">
+      <bpmn:incoming>MF_40</bpmn:incoming>
+      <bpmn:outgoing>MF_42</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:endEvent id="M_Deleted" name="Доска удалена">
+      <bpmn:incoming>MF_42</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:endEvent id="M_NoDelete" name="Чужую доску удалить нельзя">
+      <bpmn:incoming>MF_41</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:sequenceFlow id="MF_01" sourceRef="M_Start" targetRef="M_CheckRole" />
+    <bpmn:sequenceFlow id="MF_02" sourceRef="M_CheckRole" targetRef="M_HasRole" />
+    <bpmn:sequenceFlow id="MF_03" name="Да" sourceRef="M_HasRole" targetRef="M_OpenMenu" />
+    <bpmn:sequenceFlow id="MF_04" name="Нет" sourceRef="M_HasRole" targetRef="M_Disabled" />
+    <bpmn:sequenceFlow id="MF_05" sourceRef="M_Disabled" targetRef="M_GrantRole" />
+    <bpmn:sequenceFlow id="MF_06" sourceRef="M_GrantRole" targetRef="M_CheckRole" />
+    <bpmn:sequenceFlow id="MF_07" sourceRef="M_OpenMenu" targetRef="M_ShowPage" />
+    <bpmn:sequenceFlow id="MF_08" sourceRef="M_ShowPage" targetRef="M_Choice" />
+    <bpmn:sequenceFlow id="MF_09" name="Новая" sourceRef="M_Choice" targetRef="M_ClickNew" />
+    <bpmn:sequenceFlow id="MF_10" name="Из истории" sourceRef="M_Choice" targetRef="M_PickHistory" />
+    <bpmn:sequenceFlow id="MF_11" sourceRef="M_ClickNew" targetRef="M_Create" />
+    <bpmn:sequenceFlow id="MF_12" sourceRef="M_PickHistory" targetRef="M_IsActive" />
+    <bpmn:sequenceFlow id="MF_13" sourceRef="M_Create" targetRef="M_Rename" />
+    <bpmn:sequenceFlow id="MF_14" name="Да" sourceRef="M_IsActive" targetRef="M_OpenFull" />
+    <bpmn:sequenceFlow id="MF_15" name="Нет, приостановлена" sourceRef="M_IsActive" targetRef="M_OpenView" />
+    <bpmn:sequenceFlow id="MF_16" sourceRef="M_OpenView" targetRef="M_ViewEnd" />
+    <bpmn:sequenceFlow id="MF_17" sourceRef="M_Rename" targetRef="M_Settings" />
+    <bpmn:sequenceFlow id="MF_18" sourceRef="M_Settings" targetRef="M_ShareLink" />
+    <bpmn:sequenceFlow id="MF_19" sourceRef="M_ShareLink" targetRef="M_MergeOpen" />
+    <bpmn:sequenceFlow id="MF_20" sourceRef="M_OpenFull" targetRef="M_MergeOpen" />
+    <bpmn:sequenceFlow id="MF_21" sourceRef="M_MergeOpen" targetRef="M_Split" />
+    <bpmn:sequenceFlow id="MF_22" sourceRef="M_Split" targetRef="M_Manage" />
+    <bpmn:sequenceFlow id="MF_23" sourceRef="M_Split" targetRef="M_OpenLink" />
+    <bpmn:sequenceFlow id="MF_24" sourceRef="M_OpenLink" targetRef="M_HowJoined" />
+    <bpmn:sequenceFlow id="MF_25" name="Без входа" sourceRef="M_HowJoined" targetRef="M_RightsAnon" />
+    <bpmn:sequenceFlow id="MF_26" name="С учёткой" sourceRef="M_HowJoined" targetRef="M_RightsUser" />
+    <bpmn:sequenceFlow id="MF_27" name="Дежурный, админ" sourceRef="M_HowJoined" targetRef="M_RightsDuty" />
+    <bpmn:sequenceFlow id="MF_28" sourceRef="M_RightsAnon" targetRef="M_MergeRights" />
+    <bpmn:sequenceFlow id="MF_29" sourceRef="M_RightsUser" targetRef="M_MergeRights" />
+    <bpmn:sequenceFlow id="MF_30" sourceRef="M_RightsDuty" targetRef="M_MergeRights" />
+    <bpmn:sequenceFlow id="MF_31" sourceRef="M_MergeRights" targetRef="M_Work" />
+    <bpmn:sequenceFlow id="MF_32" sourceRef="M_Work" targetRef="M_Join" />
+    <bpmn:sequenceFlow id="MF_33" sourceRef="M_Manage" targetRef="M_Join" />
+    <bpmn:sequenceFlow id="MF_34" sourceRef="M_Join" targetRef="M_Finish" />
+    <bpmn:sequenceFlow id="MF_35" sourceRef="M_Finish" targetRef="M_Pause" />
+    <bpmn:sequenceFlow id="MF_36" sourceRef="M_Finish" targetRef="M_Delete" />
+    <bpmn:sequenceFlow id="MF_37" sourceRef="M_Pause" targetRef="M_ReadOnly" />
+    <bpmn:sequenceFlow id="MF_38" sourceRef="M_ReadOnly" targetRef="M_Paused" />
+    <bpmn:sequenceFlow id="MF_39" sourceRef="M_Delete" targetRef="M_IsOwner" />
+    <bpmn:sequenceFlow id="MF_40" name="Да" sourceRef="M_IsOwner" targetRef="M_DoDelete" />
+    <bpmn:sequenceFlow id="MF_41" name="Нет" sourceRef="M_IsOwner" targetRef="M_NoDelete" />
+    <bpmn:sequenceFlow id="MF_42" sourceRef="M_DoDelete" targetRef="M_Deleted" />
+    <bpmn:textAnnotation id="M_NoteHistory">
+      <bpmn:text>История — все доски всех дежурных: превью, название (обычно INC-номер), дата, владелец</bpmn:text>
+    </bpmn:textAnnotation>
+    <bpmn:association id="M_NoteHistory_assoc" associationDirection="None" sourceRef="M_ShowPage" targetRef="M_NoteHistory" />
+    <bpmn:textAnnotation id="M_NoteDefaults">
+      <bpmn:text>Права по умолчанию для присоединившихся: «Только чтение» (по умолчанию) или «Чтение и запись»</bpmn:text>
+    </bpmn:textAnnotation>
+    <bpmn:association id="M_NoteDefaults_assoc" associationDirection="None" sourceRef="M_Settings" targetRef="M_NoteDefaults" />
+    <bpmn:textAnnotation id="M_NoteEqual">
+      <bpmn:text>У всех дежурных равные права: другой дежурный подключается к доске и тоже управляет ей</bpmn:text>
+    </bpmn:textAnnotation>
+    <bpmn:association id="M_NoteEqual_assoc" associationDirection="None" sourceRef="M_Manage" targetRef="M_NoteEqual" />
+    <bpmn:textAnnotation id="M_NoteKeep">
+      <bpmn:text>Все, кто присоединялся, сохраняют доступ к доске — только просмотр</bpmn:text>
+    </bpmn:textAnnotation>
+    <bpmn:association id="M_NoteKeep_assoc" associationDirection="None" sourceRef="M_ReadOnly" targetRef="M_NoteKeep" />
+  </bpmn:process>
+  <bpmn:process id="Process_Alt" isExecutable="false">
+    <bpmn:laneSet id="Process_Alt_lanes">
+      <bpmn:lane id="Alt_Lane_Duty" name="Дежурный">
+        <bpmn:flowNodeRef>A_Start</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>A_Fill</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>A_Toggle</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>A_Notify</bpmn:flowNodeRef>
+      </bpmn:lane>
+      <bpmn:lane id="Alt_Lane_Notifier" name="Оповещатор">
+        <bpmn:flowNodeRef>A_CreateKS</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>A_Send</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>A_SendKSOnly</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>A_NoBoard</bpmn:flowNodeRef>
+      </bpmn:lane>
+      <bpmn:lane id="Alt_Lane_Board" name="Система «Доска»">
+        <bpmn:flowNodeRef>A_CreateBoard</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>A_HowJoined</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>A_RightsRW</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>A_RightsRO</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>A_MergeRights</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>A_BoardFailed</bpmn:flowNodeRef>
+      </bpmn:lane>
+      <bpmn:lane id="Alt_Lane_User" name="Пользователь">
+        <bpmn:flowNodeRef>A_OpenLink</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>A_Work</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>A_End</bpmn:flowNodeRef>
+      </bpmn:lane>
+    </bpmn:laneSet>
+    <bpmn:startEvent id="A_Start" name="Авария: нужно собрать КС">
+      <bpmn:outgoing>AF_01</bpmn:outgoing>
+    </bpmn:startEvent>
+    <bpmn:userTask id="A_Fill" name="Заполнить аварию в Оповещаторе и выбрать участников КС">
+      <bpmn:incoming>AF_01</bpmn:incoming>
+      <bpmn:outgoing>AF_02</bpmn:outgoing>
+    </bpmn:userTask>
+    <bpmn:userTask id="A_Toggle" name="Включить тумблер «Доска» в настройках КС">
+      <bpmn:incoming>AF_02</bpmn:incoming>
+      <bpmn:outgoing>AF_03</bpmn:outgoing>
+    </bpmn:userTask>
+    <bpmn:userTask id="A_Notify" name="Нажать «Оповестить»">
+      <bpmn:incoming>AF_03</bpmn:incoming>
+      <bpmn:outgoing>AF_04</bpmn:outgoing>
+    </bpmn:userTask>
+    <bpmn:serviceTask id="A_CreateKS" name="Создать КС">
+      <bpmn:incoming>AF_04</bpmn:incoming>
+      <bpmn:outgoing>AF_05</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:serviceTask id="A_CreateBoard" name="Создать пустую доску: владелец — дежурный, права по умолчанию — чтение и запись">
+      <bpmn:incoming>AF_05</bpmn:incoming>
+      <bpmn:outgoing>AF_06</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:serviceTask id="A_Send" name="Отправить участникам одно сообщение: ссылка на КС и ссылка на доску">
+      <bpmn:incoming>AF_06</bpmn:incoming>
+      <bpmn:outgoing>AF_09</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:serviceTask id="A_SendKSOnly" name="Отправить сообщение только со ссылкой на КС">
+      <bpmn:incoming>AF_07</bpmn:incoming>
+      <bpmn:outgoing>AF_08</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:endEvent id="A_NoBoard" name="КС без доски: дежурный создаёт её вручную">
+      <bpmn:incoming>AF_08</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:userTask id="A_OpenLink" name="Открыть ссылку на доску из сообщения">
+      <bpmn:incoming>AF_09</bpmn:incoming>
+      <bpmn:outgoing>AF_10</bpmn:outgoing>
+    </bpmn:userTask>
+    <bpmn:exclusiveGateway id="A_HowJoined" name="Вошёл через корп. учётку?">
+      <bpmn:incoming>AF_10</bpmn:incoming>
+      <bpmn:outgoing>AF_11</bpmn:outgoing>
+      <bpmn:outgoing>AF_12</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:serviceTask id="A_RightsRW" name="Права по умолчанию: чтение и запись">
+      <bpmn:incoming>AF_11</bpmn:incoming>
+      <bpmn:outgoing>AF_13</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:serviceTask id="A_RightsRO" name="Аноним без входа: только чтение">
+      <bpmn:incoming>AF_12</bpmn:incoming>
+      <bpmn:outgoing>AF_14</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:exclusiveGateway id="A_MergeRights">
+      <bpmn:incoming>AF_13</bpmn:incoming>
+      <bpmn:incoming>AF_14</bpmn:incoming>
+      <bpmn:outgoing>AF_15</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:userTask id="A_Work" name="Обсуждать аварию на доске параллельно с КС">
+      <bpmn:incoming>AF_15</bpmn:incoming>
+      <bpmn:outgoing>AF_16</bpmn:outgoing>
+    </bpmn:userTask>
+    <bpmn:endEvent id="A_End" name="Дальше — как в основном сценарии">
+      <bpmn:incoming>AF_16</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:boundaryEvent id="A_BoardFailed" name="Сбой создания доски" attachedToRef="A_CreateBoard">
+      <bpmn:outgoing>AF_07</bpmn:outgoing>
+      <bpmn:errorEventDefinition id="A_BoardFailed_def" />
+    </bpmn:boundaryEvent>
+    <bpmn:sequenceFlow id="AF_01" sourceRef="A_Start" targetRef="A_Fill" />
+    <bpmn:sequenceFlow id="AF_02" sourceRef="A_Fill" targetRef="A_Toggle" />
+    <bpmn:sequenceFlow id="AF_03" sourceRef="A_Toggle" targetRef="A_Notify" />
+    <bpmn:sequenceFlow id="AF_04" sourceRef="A_Notify" targetRef="A_CreateKS" />
+    <bpmn:sequenceFlow id="AF_05" sourceRef="A_CreateKS" targetRef="A_CreateBoard" />
+    <bpmn:sequenceFlow id="AF_06" sourceRef="A_CreateBoard" targetRef="A_Send" />
+    <bpmn:sequenceFlow id="AF_07" sourceRef="A_BoardFailed" targetRef="A_SendKSOnly" />
+    <bpmn:sequenceFlow id="AF_08" sourceRef="A_SendKSOnly" targetRef="A_NoBoard" />
+    <bpmn:sequenceFlow id="AF_09" sourceRef="A_Send" targetRef="A_OpenLink" />
+    <bpmn:sequenceFlow id="AF_10" sourceRef="A_OpenLink" targetRef="A_HowJoined" />
+    <bpmn:sequenceFlow id="AF_11" name="Да" sourceRef="A_HowJoined" targetRef="A_RightsRW" />
+    <bpmn:sequenceFlow id="AF_12" name="Нет" sourceRef="A_HowJoined" targetRef="A_RightsRO" />
+    <bpmn:sequenceFlow id="AF_13" sourceRef="A_RightsRW" targetRef="A_MergeRights" />
+    <bpmn:sequenceFlow id="AF_14" sourceRef="A_RightsRO" targetRef="A_MergeRights" />
+    <bpmn:sequenceFlow id="AF_15" sourceRef="A_MergeRights" targetRef="A_Work" />
+    <bpmn:sequenceFlow id="AF_16" sourceRef="A_Work" targetRef="A_End" />
+    <bpmn:textAnnotation id="A_NoteFail">
+      <bpmn:text>Сбой создания доски не блокирует КС и оповещение</bpmn:text>
+    </bpmn:textAnnotation>
+    <bpmn:association id="A_NoteFail_assoc" associationDirection="None" sourceRef="A_SendKSOnly" targetRef="A_NoteFail" />
+  </bpmn:process>
+  <bpmndi:BPMNDiagram id="Diagram_Board">
+    <bpmndi:BPMNPlane id="Plane_Board" bpmnElement="Collaboration_Board">
+      <bpmndi:BPMNShape id="Pool_Main_di" bpmnElement="Pool_Main" isHorizontal="true">
+        <dc:Bounds x="160" y="80" width="4210" height="890" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Lane_Duty_di" bpmnElement="Lane_Duty" isHorizontal="true">
+        <dc:Bounds x="190" y="80" width="4180" height="250" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Lane_Board_di" bpmnElement="Lane_Board" isHorizontal="true">
+        <dc:Bounds x="190" y="330" width="4180" height="360" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Lane_User_di" bpmnElement="Lane_User" isHorizontal="true">
+        <dc:Bounds x="190" y="690" width="4180" height="140" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Lane_Admin_di" bpmnElement="Lane_Admin" isHorizontal="true">
+        <dc:Bounds x="190" y="830" width="4180" height="140" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="M_Start_di" bpmnElement="M_Start">
+        <dc:Bounds x="307" y="132" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="280" y="174" width="90" height="28" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="M_CheckRole_di" bpmnElement="M_CheckRole">
+        <dc:Bounds x="420" y="360" width="150" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="M_HasRole_di" bpmnElement="M_HasRole" isMarkerVisible="true">
+        <dc:Bounds x="640" y="375" width="50" height="50" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="698" y="380" width="90" height="41" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="M_Disabled_di" bpmnElement="M_Disabled">
+        <dc:Bounds x="590" y="470" width="150" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="M_GrantRole_di" bpmnElement="M_GrantRole">
+        <dc:Bounds x="590" y="860" width="150" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="M_OpenMenu_di" bpmnElement="M_OpenMenu">
+        <dc:Bounds x="760" y="110" width="150" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="M_ShowPage_di" bpmnElement="M_ShowPage">
+        <dc:Bounds x="930" y="360" width="150" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="M_Choice_di" bpmnElement="M_Choice" isMarkerVisible="true">
+        <dc:Bounds x="1150" y="125" width="50" height="50" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1130" y="91" width="90" height="28" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="M_ClickNew_di" bpmnElement="M_ClickNew">
+        <dc:Bounds x="1270" y="110" width="150" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="M_PickHistory_di" bpmnElement="M_PickHistory">
+        <dc:Bounds x="1270" y="220" width="150" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="M_Create_di" bpmnElement="M_Create">
+        <dc:Bounds x="1440" y="360" width="150" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="M_IsActive_di" bpmnElement="M_IsActive" isMarkerVisible="true">
+        <dc:Bounds x="1490" y="485" width="50" height="50" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1470" y="464" width="90" height="15" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="M_Rename_di" bpmnElement="M_Rename">
+        <dc:Bounds x="1610" y="110" width="150" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="M_OpenFull_di" bpmnElement="M_OpenFull">
+        <dc:Bounds x="1610" y="470" width="150" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="M_OpenView_di" bpmnElement="M_OpenView">
+        <dc:Bounds x="1610" y="580" width="150" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="M_Settings_di" bpmnElement="M_Settings">
+        <dc:Bounds x="1780" y="110" width="150" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="M_ViewEnd_di" bpmnElement="M_ViewEnd">
+        <dc:Bounds x="1837" y="602" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1810" y="644" width="90" height="28" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="M_ShareLink_di" bpmnElement="M_ShareLink">
+        <dc:Bounds x="1950" y="110" width="150" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="M_MergeOpen_di" bpmnElement="M_MergeOpen" isMarkerVisible="true">
+        <dc:Bounds x="2170" y="125" width="50" height="50" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="M_Split_di" bpmnElement="M_Split">
+        <dc:Bounds x="2340" y="125" width="50" height="50" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="M_Manage_di" bpmnElement="M_Manage">
+        <dc:Bounds x="2460" y="110" width="150" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="M_OpenLink_di" bpmnElement="M_OpenLink">
+        <dc:Bounds x="2460" y="720" width="150" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="M_HowJoined_di" bpmnElement="M_HowJoined" isMarkerVisible="true">
+        <dc:Bounds x="2680" y="485" width="50" height="50" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="2594" y="455" width="90" height="28" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="M_RightsAnon_di" bpmnElement="M_RightsAnon">
+        <dc:Bounds x="2800" y="360" width="150" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="M_RightsUser_di" bpmnElement="M_RightsUser">
+        <dc:Bounds x="2800" y="470" width="150" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="M_RightsDuty_di" bpmnElement="M_RightsDuty">
+        <dc:Bounds x="2800" y="580" width="150" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="M_MergeRights_di" bpmnElement="M_MergeRights" isMarkerVisible="true">
+        <dc:Bounds x="3020" y="485" width="50" height="50" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="M_Work_di" bpmnElement="M_Work">
+        <dc:Bounds x="3140" y="720" width="150" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="M_Join_di" bpmnElement="M_Join">
+        <dc:Bounds x="3360" y="125" width="50" height="50" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="M_Finish_di" bpmnElement="M_Finish" isMarkerVisible="true">
+        <dc:Bounds x="3530" y="125" width="50" height="50" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="3510" y="91" width="90" height="28" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="M_Pause_di" bpmnElement="M_Pause">
+        <dc:Bounds x="3650" y="110" width="150" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="M_ReadOnly_di" bpmnElement="M_ReadOnly">
+        <dc:Bounds x="3820" y="360" width="150" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="M_Paused_di" bpmnElement="M_Paused">
+        <dc:Bounds x="4047" y="382" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="4020" y="424" width="90" height="28" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="M_Delete_di" bpmnElement="M_Delete">
+        <dc:Bounds x="3650" y="220" width="150" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="M_IsOwner_di" bpmnElement="M_IsOwner" isMarkerVisible="true">
+        <dc:Bounds x="3870" y="485" width="50" height="50" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="3799" y="539" width="90" height="41" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="M_DoDelete_di" bpmnElement="M_DoDelete">
+        <dc:Bounds x="3990" y="470" width="150" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="M_Deleted_di" bpmnElement="M_Deleted">
+        <dc:Bounds x="4217" y="492" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="4190" y="534" width="90" height="15" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="M_NoDelete_di" bpmnElement="M_NoDelete">
+        <dc:Bounds x="4047" y="602" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="4020" y="644" width="90" height="28" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="M_NoteHistory_di" bpmnElement="M_NoteHistory">
+        <dc:Bounds x="930" y="518" width="230" height="62" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="M_NoteDefaults_di" bpmnElement="M_NoteDefaults">
+        <dc:Bounds x="1760" y="229" width="250" height="62" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="M_NoteEqual_di" bpmnElement="M_NoteEqual">
+        <dc:Bounds x="2460" y="229" width="260" height="62" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="M_NoteKeep_di" bpmnElement="M_NoteKeep">
+        <dc:Bounds x="3860" y="179" width="220" height="48" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNEdge id="MF_01_di" bpmnElement="MF_01">
+        <di:waypoint x="343" y="150" />
+        <di:waypoint x="382" y="150" />
+        <di:waypoint x="382" y="400" />
+        <di:waypoint x="420" y="400" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="MF_02_di" bpmnElement="MF_02">
+        <di:waypoint x="570" y="400" />
+        <di:waypoint x="640" y="400" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="MF_03_di" bpmnElement="MF_03">
+        <di:waypoint x="665" y="375" />
+        <di:waypoint x="665" y="150" />
+        <di:waypoint x="760" y="150" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="671" y="355" width="24" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="MF_04_di" bpmnElement="MF_04">
+        <di:waypoint x="665" y="425" />
+        <di:waypoint x="665" y="470" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="671" y="431" width="30" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="MF_05_di" bpmnElement="MF_05">
+        <di:waypoint x="665" y="550" />
+        <di:waypoint x="665" y="860" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="MF_06_di" bpmnElement="MF_06">
+        <di:waypoint x="590" y="900" />
+        <di:waypoint x="495" y="900" />
+        <di:waypoint x="495" y="440" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="MF_07_di" bpmnElement="MF_07">
+        <di:waypoint x="910" y="150" />
+        <di:waypoint x="920" y="150" />
+        <di:waypoint x="920" y="400" />
+        <di:waypoint x="930" y="400" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="MF_08_di" bpmnElement="MF_08">
+        <di:waypoint x="1080" y="400" />
+        <di:waypoint x="1115" y="400" />
+        <di:waypoint x="1115" y="150" />
+        <di:waypoint x="1150" y="150" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="MF_09_di" bpmnElement="MF_09">
+        <di:waypoint x="1200" y="150" />
+        <di:waypoint x="1270" y="150" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1210" y="132" width="50" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="MF_10_di" bpmnElement="MF_10">
+        <di:waypoint x="1175" y="175" />
+        <di:waypoint x="1175" y="260" />
+        <di:waypoint x="1270" y="260" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1181" y="181" width="80" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="MF_11_di" bpmnElement="MF_11">
+        <di:waypoint x="1420" y="150" />
+        <di:waypoint x="1430" y="150" />
+        <di:waypoint x="1430" y="400" />
+        <di:waypoint x="1440" y="400" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="MF_12_di" bpmnElement="MF_12">
+        <di:waypoint x="1345" y="300" />
+        <di:waypoint x="1345" y="510" />
+        <di:waypoint x="1490" y="510" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="MF_13_di" bpmnElement="MF_13">
+        <di:waypoint x="1590" y="400" />
+        <di:waypoint x="1600" y="400" />
+        <di:waypoint x="1600" y="150" />
+        <di:waypoint x="1610" y="150" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="MF_14_di" bpmnElement="MF_14">
+        <di:waypoint x="1540" y="510" />
+        <di:waypoint x="1610" y="510" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1546" y="492" width="24" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="MF_15_di" bpmnElement="MF_15">
+        <di:waypoint x="1515" y="535" />
+        <di:waypoint x="1515" y="620" />
+        <di:waypoint x="1610" y="620" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1521" y="547" width="80" height="28" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="MF_16_di" bpmnElement="MF_16">
+        <di:waypoint x="1760" y="620" />
+        <di:waypoint x="1837" y="620" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="MF_17_di" bpmnElement="MF_17">
+        <di:waypoint x="1760" y="150" />
+        <di:waypoint x="1780" y="150" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="MF_18_di" bpmnElement="MF_18">
+        <di:waypoint x="1930" y="150" />
+        <di:waypoint x="1950" y="150" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="MF_19_di" bpmnElement="MF_19">
+        <di:waypoint x="2100" y="150" />
+        <di:waypoint x="2170" y="150" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="MF_20_di" bpmnElement="MF_20">
+        <di:waypoint x="1760" y="510" />
+        <di:waypoint x="2195" y="510" />
+        <di:waypoint x="2195" y="175" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="MF_21_di" bpmnElement="MF_21">
+        <di:waypoint x="2220" y="150" />
+        <di:waypoint x="2340" y="150" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="MF_22_di" bpmnElement="MF_22">
+        <di:waypoint x="2390" y="150" />
+        <di:waypoint x="2460" y="150" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="MF_23_di" bpmnElement="MF_23">
+        <di:waypoint x="2365" y="175" />
+        <di:waypoint x="2365" y="760" />
+        <di:waypoint x="2460" y="760" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="MF_24_di" bpmnElement="MF_24">
+        <di:waypoint x="2610" y="760" />
+        <di:waypoint x="2645" y="760" />
+        <di:waypoint x="2645" y="510" />
+        <di:waypoint x="2680" y="510" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="MF_25_di" bpmnElement="MF_25">
+        <di:waypoint x="2705" y="485" />
+        <di:waypoint x="2705" y="400" />
+        <di:waypoint x="2800" y="400" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="2711" y="465" width="70" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="MF_26_di" bpmnElement="MF_26">
+        <di:waypoint x="2730" y="510" />
+        <di:waypoint x="2800" y="510" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="2736" y="492" width="60" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="MF_27_di" bpmnElement="MF_27">
+        <di:waypoint x="2705" y="535" />
+        <di:waypoint x="2705" y="620" />
+        <di:waypoint x="2800" y="620" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="2711" y="541" width="70" height="28" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="MF_28_di" bpmnElement="MF_28">
+        <di:waypoint x="2950" y="400" />
+        <di:waypoint x="3045" y="400" />
+        <di:waypoint x="3045" y="485" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="MF_29_di" bpmnElement="MF_29">
+        <di:waypoint x="2950" y="510" />
+        <di:waypoint x="3020" y="510" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="MF_30_di" bpmnElement="MF_30">
+        <di:waypoint x="2950" y="620" />
+        <di:waypoint x="3045" y="620" />
+        <di:waypoint x="3045" y="535" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="MF_31_di" bpmnElement="MF_31">
+        <di:waypoint x="3070" y="510" />
+        <di:waypoint x="3215" y="510" />
+        <di:waypoint x="3215" y="720" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="MF_32_di" bpmnElement="MF_32">
+        <di:waypoint x="3290" y="760" />
+        <di:waypoint x="3385" y="760" />
+        <di:waypoint x="3385" y="175" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="MF_33_di" bpmnElement="MF_33">
+        <di:waypoint x="2610" y="150" />
+        <di:waypoint x="3360" y="150" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="MF_34_di" bpmnElement="MF_34">
+        <di:waypoint x="3410" y="150" />
+        <di:waypoint x="3530" y="150" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="MF_35_di" bpmnElement="MF_35">
+        <di:waypoint x="3580" y="150" />
+        <di:waypoint x="3650" y="150" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="MF_36_di" bpmnElement="MF_36">
+        <di:waypoint x="3555" y="175" />
+        <di:waypoint x="3555" y="260" />
+        <di:waypoint x="3650" y="260" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="MF_37_di" bpmnElement="MF_37">
+        <di:waypoint x="3800" y="150" />
+        <di:waypoint x="3810" y="150" />
+        <di:waypoint x="3810" y="400" />
+        <di:waypoint x="3820" y="400" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="MF_38_di" bpmnElement="MF_38">
+        <di:waypoint x="3970" y="400" />
+        <di:waypoint x="4047" y="400" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="MF_39_di" bpmnElement="MF_39">
+        <di:waypoint x="3725" y="300" />
+        <di:waypoint x="3725" y="510" />
+        <di:waypoint x="3870" y="510" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="MF_40_di" bpmnElement="MF_40">
+        <di:waypoint x="3920" y="510" />
+        <di:waypoint x="3990" y="510" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="3926" y="492" width="24" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="MF_41_di" bpmnElement="MF_41">
+        <di:waypoint x="3895" y="535" />
+        <di:waypoint x="3895" y="620" />
+        <di:waypoint x="4047" y="620" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="3901" y="541" width="30" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="MF_42_di" bpmnElement="MF_42">
+        <di:waypoint x="4140" y="510" />
+        <di:waypoint x="4217" y="510" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="M_NoteHistory_assoc_di" bpmnElement="M_NoteHistory_assoc">
+        <di:waypoint x="1005" y="440" />
+        <di:waypoint x="1005" y="518" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="M_NoteDefaults_assoc_di" bpmnElement="M_NoteDefaults_assoc">
+        <di:waypoint x="1855" y="190" />
+        <di:waypoint x="1855" y="229" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="M_NoteEqual_assoc_di" bpmnElement="M_NoteEqual_assoc">
+        <di:waypoint x="2535" y="190" />
+        <di:waypoint x="2535" y="229" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="M_NoteKeep_assoc_di" bpmnElement="M_NoteKeep_assoc">
+        <di:waypoint x="3895" y="360" />
+        <di:waypoint x="3895" y="227" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNShape id="Pool_Alt_di" bpmnElement="Pool_Alt" isHorizontal="true">
+        <dc:Bounds x="160" y="1030" width="4210" height="780" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Alt_Lane_Duty_di" bpmnElement="Alt_Lane_Duty" isHorizontal="true">
+        <dc:Bounds x="190" y="1030" width="4180" height="140" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Alt_Lane_Notifier_di" bpmnElement="Alt_Lane_Notifier" isHorizontal="true">
+        <dc:Bounds x="190" y="1170" width="4180" height="250" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Alt_Lane_Board_di" bpmnElement="Alt_Lane_Board" isHorizontal="true">
+        <dc:Bounds x="190" y="1420" width="4180" height="250" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Alt_Lane_User_di" bpmnElement="Alt_Lane_User" isHorizontal="true">
+        <dc:Bounds x="190" y="1670" width="4180" height="140" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="A_Start_di" bpmnElement="A_Start">
+        <dc:Bounds x="307" y="1082" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="280" y="1124" width="90" height="28" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="A_Fill_di" bpmnElement="A_Fill">
+        <dc:Bounds x="420" y="1060" width="150" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="A_Toggle_di" bpmnElement="A_Toggle">
+        <dc:Bounds x="590" y="1060" width="150" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="A_Notify_di" bpmnElement="A_Notify">
+        <dc:Bounds x="760" y="1060" width="150" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="A_CreateKS_di" bpmnElement="A_CreateKS">
+        <dc:Bounds x="930" y="1310" width="150" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="A_CreateBoard_di" bpmnElement="A_CreateBoard">
+        <dc:Bounds x="1100" y="1440" width="150" height="100" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="A_Send_di" bpmnElement="A_Send">
+        <dc:Bounds x="1270" y="1310" width="150" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="A_SendKSOnly_di" bpmnElement="A_SendKSOnly">
+        <dc:Bounds x="1270" y="1200" width="150" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="A_NoBoard_di" bpmnElement="A_NoBoard">
+        <dc:Bounds x="1497" y="1222" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1541" y="1220" width="90" height="41" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="A_OpenLink_di" bpmnElement="A_OpenLink">
+        <dc:Bounds x="1440" y="1700" width="150" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="A_HowJoined_di" bpmnElement="A_HowJoined" isMarkerVisible="true">
+        <dc:Bounds x="1660" y="1575" width="50" height="50" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1562" y="1586" width="90" height="28" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="A_RightsRW_di" bpmnElement="A_RightsRW">
+        <dc:Bounds x="1780" y="1450" width="150" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="A_RightsRO_di" bpmnElement="A_RightsRO">
+        <dc:Bounds x="1780" y="1560" width="150" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="A_MergeRights_di" bpmnElement="A_MergeRights" isMarkerVisible="true">
+        <dc:Bounds x="2000" y="1575" width="50" height="50" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="A_Work_di" bpmnElement="A_Work">
+        <dc:Bounds x="2120" y="1700" width="150" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="A_End_di" bpmnElement="A_End">
+        <dc:Bounds x="2347" y="1722" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="2391" y="1720" width="90" height="41" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="A_BoardFailed_di" bpmnElement="A_BoardFailed">
+        <dc:Bounds x="1210" y="1422" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1124" y="1392" width="90" height="28" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="A_NoteFail_di" bpmnElement="A_NoteFail">
+        <dc:Bounds x="1270" y="1076" width="210" height="48" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNEdge id="AF_01_di" bpmnElement="AF_01">
+        <di:waypoint x="343" y="1100" />
+        <di:waypoint x="420" y="1100" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="AF_02_di" bpmnElement="AF_02">
+        <di:waypoint x="570" y="1100" />
+        <di:waypoint x="590" y="1100" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="AF_03_di" bpmnElement="AF_03">
+        <di:waypoint x="740" y="1100" />
+        <di:waypoint x="760" y="1100" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="AF_04_di" bpmnElement="AF_04">
+        <di:waypoint x="910" y="1100" />
+        <di:waypoint x="920" y="1100" />
+        <di:waypoint x="920" y="1350" />
+        <di:waypoint x="930" y="1350" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="AF_05_di" bpmnElement="AF_05">
+        <di:waypoint x="1080" y="1350" />
+        <di:waypoint x="1090" y="1350" />
+        <di:waypoint x="1090" y="1490" />
+        <di:waypoint x="1100" y="1490" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="AF_06_di" bpmnElement="AF_06">
+        <di:waypoint x="1250" y="1490" />
+        <di:waypoint x="1260" y="1490" />
+        <di:waypoint x="1260" y="1350" />
+        <di:waypoint x="1270" y="1350" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="AF_07_di" bpmnElement="AF_07">
+        <di:waypoint x="1228" y="1422" />
+        <di:waypoint x="1228" y="1240" />
+        <di:waypoint x="1270" y="1240" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="AF_08_di" bpmnElement="AF_08">
+        <di:waypoint x="1420" y="1240" />
+        <di:waypoint x="1497" y="1240" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="AF_09_di" bpmnElement="AF_09">
+        <di:waypoint x="1420" y="1350" />
+        <di:waypoint x="1430" y="1350" />
+        <di:waypoint x="1430" y="1740" />
+        <di:waypoint x="1440" y="1740" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="AF_10_di" bpmnElement="AF_10">
+        <di:waypoint x="1590" y="1740" />
+        <di:waypoint x="1685" y="1740" />
+        <di:waypoint x="1685" y="1625" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="AF_11_di" bpmnElement="AF_11">
+        <di:waypoint x="1685" y="1575" />
+        <di:waypoint x="1685" y="1490" />
+        <di:waypoint x="1780" y="1490" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1691" y="1555" width="24" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="AF_12_di" bpmnElement="AF_12">
+        <di:waypoint x="1710" y="1600" />
+        <di:waypoint x="1780" y="1600" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1718" y="1582" width="30" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="AF_13_di" bpmnElement="AF_13">
+        <di:waypoint x="1930" y="1490" />
+        <di:waypoint x="2025" y="1490" />
+        <di:waypoint x="2025" y="1575" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="AF_14_di" bpmnElement="AF_14">
+        <di:waypoint x="1930" y="1600" />
+        <di:waypoint x="2000" y="1600" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="AF_15_di" bpmnElement="AF_15">
+        <di:waypoint x="2050" y="1600" />
+        <di:waypoint x="2195" y="1600" />
+        <di:waypoint x="2195" y="1700" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="AF_16_di" bpmnElement="AF_16">
+        <di:waypoint x="2270" y="1740" />
+        <di:waypoint x="2347" y="1740" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="A_NoteFail_assoc_di" bpmnElement="A_NoteFail_assoc">
+        <di:waypoint x="1345" y="1200" />
+        <di:waypoint x="1345" y="1124" />
+      </bpmndi:BPMNEdge>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+</bpmn:definitions>
