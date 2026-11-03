@@ -10,7 +10,7 @@
 // Все цвета на страницах берутся только из палитры и привязываются к стилям.
 // Текст: 3 размера (24 / 16 / 14), 5 стилей.
 
-const VERSION = "v7.23 · 02.11 · ширина списка досок";
+const VERSION = "v7.26 · 03.11 · поиск и фильтр участников";
 const PAGE_NAME = "UI KIT";
 const FLOW_PAGE = "ORIGIN";
 
@@ -1683,105 +1683,259 @@ async function buildSegmented() {
 async function buildSelect() {
   const c = figma.createComponent();
   c.name = "Select";
-  c.description = "Выпадающий список группы участника. Доступные группы: Редактор и Читатель. Значение — свойство Value.";
+  c.description = "Группа участника. Значение — Value. Новая роль применяется только кнопкой с галочкой в строке.";
   c.layoutMode = "HORIZONTAL";
-  c.primaryAxisSizingMode = "FIXED"; c.counterAxisSizingMode = "FIXED";
-  c.resize(200, 40);
+  c.resize(176, 40);
+  c.primaryAxisSizingMode = c.counterAxisSizingMode = "FIXED";
   c.primaryAxisAlignItems = "SPACE_BETWEEN"; c.counterAxisAlignItems = "CENTER";
   c.paddingLeft = 12; c.paddingRight = 8; c.cornerRadius = 8;
   await fillWith(c, "Neutral/White");
   await strokeWith(c, "UI/Border"); c.strokeWeight = 1; c.strokeAlign = "INSIDE";
-  const t = await text("Редактор", "Body"); t.name = "value";
-  c.appendChild(t);
-  const ch = icon.ChevronDown.createInstance(); recolorIcon(ch, "UI/Secondary"); c.appendChild(ch);
-  const key = c.addComponentProperty("Value", "TEXT", "Редактор");
-  t.componentPropertyReferences = { characters: key };
+  const t = await text("Редактор", "Body"); t.name = "value"; c.appendChild(t);
+  const ch = icon.ChevronDown.createInstance(); ch.name = "chevron";
+  recolorIcon(ch, "UI/Secondary"); c.appendChild(ch);
+  t.componentPropertyReferences = { characters: c.addComponentProperty("Value", "TEXT", "Редактор") };
   return c;
 }
 
 async function buildParticipantRow(selectComp) {
-  const c = figma.createComponent();
-  c.name = "Participant Row";
-  c.description = "Участник в параметрах доски: аватар, имя, выбранная группа (Select) и удаление с доски. Свойство Name.";
-  c.layoutMode = "HORIZONTAL";
-  hugHeight(c, 496);
-  c.counterAxisAlignItems = "CENTER"; c.itemSpacing = 12; c.paddingTop = c.paddingBottom = 6;
-  c.fills = [];
-  const av = avatar("Blue", "Буяков Кирилл"); av.name = "avatar"; c.appendChild(av);
-  const col = autoLayout("VERTICAL", { name: "who", itemSpacing: 0 });
-  const nm = await text("Буяков Кирилл", "Body"); nm.name = "name";
-  col.appendChild(nm);
-  c.appendChild(col); col.layoutGrow = 1;
-  const sel = selectComp.createInstance(); sel.name = "group"; setProp(sel, "Value", "Редактор");
-  c.appendChild(sel);
-  const rm = icon.Close.createInstance(); rm.name = "remove"; recolorIcon(rm, "UI/Secondary"); c.appendChild(rm);
-  const nk = c.addComponentProperty("Name", "TEXT", "Буяков Кирилл");
-  nm.componentPropertyReferences = { characters: nk };
-  av.isExposedInstance = true; sel.isExposedInstance = true;
-  return c;
+  const variants = [];
+  for (const state of ["Default", "Open", "Pending"]) {
+    const c = figma.createComponent(); c.name = `State=${state}`;
+    c.layoutMode = "HORIZONTAL"; c.resize(576, 64);
+    c.primaryAxisSizingMode = c.counterAxisSizingMode = "FIXED";
+    c.counterAxisAlignItems = "CENTER"; c.itemSpacing = 12;
+    c.paddingLeft = c.paddingRight = 8; c.cornerRadius = 10;
+    c.fills = [];
+    const av = avatar("Blue", "Буяков Кирилл"); av.name = "avatar"; c.appendChild(av);
+    const who = autoLayout("VERTICAL", { name: "who", itemSpacing: 2 });
+    const nm = await text("Буяков Кирилл", "Body"); nm.name = "name"; who.appendChild(nm);
+    c.appendChild(who); who.layoutSizingHorizontal = "FILL";
+    const sel = selectComp.createInstance(); sel.name = "group";
+    c.appendChild(sel);
+    const action = autoLayout("HORIZONTAL", {
+      name: state === "Pending" ? "confirm" : "remove",
+      primaryAxisAlignItems: "CENTER", counterAxisAlignItems: "CENTER", cornerRadius: 8,
+    });
+    action.resize(40, 40); action.primaryAxisSizingMode = action.counterAxisSizingMode = "FIXED";
+    if (state === "Pending") await fillWith(action, "Accent/Blue");
+    const glyph = icon[state === "Pending" ? "Check" : "Close"].createInstance();
+    recolorIcon(glyph, state === "Pending" ? "Neutral/White" : "UI/Secondary");
+    action.appendChild(glyph); c.appendChild(action);
+    variants.push(c);
+  }
+  const set = figma.combineAsVariants(variants, figma.currentPage); set.name = "Participant Row";
+  set.description = "State: Default / Open / Pending. При выборе роли крестик заменяется галочкой. До подтверждения доступ участника не меняется.";
+  const key = set.addComponentProperty("Name", "TEXT", "Буяков Кирилл");
+  for (const c of set.children) {
+    c.findOne((n) => n.name === "name").componentPropertyReferences = { characters: key };
+    c.findOne((n) => n.name === "avatar").isExposedInstance = true;
+    c.findOne((n) => n.name === "group").isExposedInstance = true;
+  }
+  gridSet(set, 1, 16, 24);
+  return set;
 }
 
+const SETTINGS_PAGE_SIZE = 5;
+const SETTINGS_TARGET = "Буяков Кирилл";
 const SETTINGS_PEOPLE = [
   ["Green", "Саламон Михаил", "Редактор", false],
   ["Purple", "Марков Александр", "Редактор", true],
   ["Blue", "Буяков Кирилл", "Редактор", true],
   ["Orange", "Иванова Анна", "Читатель", true],
+  ["Pink", "Максимов Александр", "Редактор", true],
+  ["Red", "Петров Дмитрий", "Редактор", true],
+  ["Teal", "Смирнова Ольга", "Читатель", true],
+  ["Magenta", "Кузнецов Игорь", "Редактор", true],
+  ["Blue", "Соколова Мария", "Читатель", true],
+  ["Purple", "Волков Андрей", "Редактор", true],
+  ["Orange", "Морозова Елена", "Читатель", true],
+  ["Green", "Новиков Алексей", "Редактор", true],
 ];
+const SETTINGS_PAGES = Math.ceil(SETTINGS_PEOPLE.length / SETTINGS_PAGE_SIZE);
 
-async function buildBoardSettings(rowComp) {
-  const c = figma.createComponent();
-  c.name = "Board Parameters";
-  c.description = "Параметры доски: базовые группы Редактор и Читатель, назначение группы каждому участнику.";
-  c.layoutMode = "VERTICAL";
-  hugHeight(c, 560);
-  c.paddingLeft = c.paddingRight = 32; c.paddingTop = 28; c.paddingBottom = 32;
-  c.itemSpacing = 24; c.cornerRadius = 16;
-  await fillWith(c, "Neutral/White");
-  c.effects = shadow(0.2, 16, 48);
-  const head = autoLayout("VERTICAL", { name: "header", itemSpacing: 4 });
-  head.appendChild(await text("Параметры", "Heading"));
-  head.appendChild(await text(INC, "Body", "UI/Secondary"));
-  c.appendChild(head);
-  const groups = autoLayout("VERTICAL", { name: "groups", itemSpacing: 12 });
-  groups.appendChild(await text("Группы", "Heading"));
-  const groupList = autoLayout("HORIZONTAL", { name: "base groups", itemSpacing: 12 });
-  for (const label of ["Редактор", "Читатель"]) {
-    const chip = autoLayout("HORIZONTAL", { name: `group / ${label}`, paddingLeft: 16, paddingRight: 16, paddingTop: 10, paddingBottom: 10, cornerRadius: 8 });
-    await fillWith(chip, "UI/Surface");
-    await strokeWith(chip, "UI/Border"); chip.strokeWeight = 1; chip.strokeAlign = "INSIDE";
-    chip.appendChild(await text(label, "Body Medium"));
-    groupList.appendChild(chip);
+async function buildRoleMenu() {
+  const variants = [];
+  for (const selected of ["Редактор", "Читатель"]) {
+    const c = figma.createComponent(); c.name = `Selected=${selected}`;
+    c.layoutMode = "VERTICAL"; hugHeight(c, 176);
+    c.paddingTop = c.paddingBottom = c.paddingLeft = c.paddingRight = 4;
+    c.itemSpacing = 2; c.cornerRadius = 10;
+    await fillWith(c, "Neutral/White"); await strokeWith(c, "UI/Border");
+    c.strokeWeight = 1; c.strokeAlign = "INSIDE"; c.effects = shadow(0.14, 8, 24);
+    for (const label of ["Редактор", "Читатель"]) {
+      const row = autoLayout("HORIZONTAL", { name: `option / ${label}`,
+        paddingLeft: 12, paddingRight: 12, paddingTop: 10, paddingBottom: 10,
+        counterAxisAlignItems: "CENTER", cornerRadius: 6 });
+      row.appendChild(await text(label, "Body"));
+      c.appendChild(row); row.layoutSizingHorizontal = "FILL";
+    }
+    variants.push(c);
   }
-  groups.appendChild(groupList);
-  c.appendChild(groups); groups.layoutSizingHorizontal = "FILL";
-  const d = divider(false); c.appendChild(d); d.layoutSizingHorizontal = "FILL";
-  const s2 = autoLayout("VERTICAL", { name: "participants", itemSpacing: 4 });
-  const participantHead = autoLayout("HORIZONTAL", { name: "participants header", counterAxisAlignItems: "CENTER", primaryAxisAlignItems: "SPACE_BETWEEN" });
-  participantHead.appendChild(await text("Участники", "Heading"));
-  const add = button("Blue", "Добавить"); add.name = "add participant";
-  participantHead.appendChild(add);
-  s2.appendChild(participantHead); participantHead.layoutSizingHorizontal = "FILL";
-  c.appendChild(s2);
-  s2.layoutSizingHorizontal = "FILL";
-  for (const [color, name, group, removable] of SETTINGS_PEOPLE) {
-    const r = rowComp.createInstance();
-    r.name = `row / ${name}`;
-    setProp(r, "Name", name);
-    const av = r.findOne((n) => n.name === "avatar");
-    av.setProperties({ Color: color }); setProp(av, "Initials", initials(name));
-    setProp(r.findOne((n) => n.name === "group"), "Value", group);
-    if (!removable) r.findOne((n) => n.name === "remove").opacity = 0;
-    s2.appendChild(r);
-    r.layoutSizingHorizontal = "FILL";
+  const set = figma.combineAsVariants(variants, figma.currentPage); set.name = "Role Menu";
+  set.description = "Список групп без выделения выбранного пункта. Выбор создаёт черновик роли; подтверждение — галочкой в строке участника.";
+  gridSet(set, 2, 24, 24); return set;
+}
+
+function paginationArrow(name, backward, disabled) {
+  const button = autoLayout("HORIZONTAL", { name, primaryAxisAlignItems: "CENTER",
+    counterAxisAlignItems: "CENTER", cornerRadius: 8 });
+  button.resize(40, 40); button.primaryAxisSizingMode = button.counterAxisSizingMode = "FIXED";
+  button.fills = pal("Neutral/White"); button.strokes = pal("UI/Border");
+  button.strokeWeight = 1; button.strokeAlign = "INSIDE";
+  const arrow = icon.ChevronRight.createInstance();
+  recolorIcon(arrow, "Neutral/Dark"); if (backward) arrow.rotation = 180;
+  button.appendChild(arrow); if (disabled) button.opacity = 0.4;
+  return button;
+}
+
+function settingsVariantName(page, state, applied, filter = "Все", query = "", groupOpen = false) {
+  return `Page=${page}, State=${state}, Applied=${applied ? "Yes" : "No"}`
+    + (filter === "Все" ? "" : `, Filter=${filter}`)
+    + (query ? `, Query=${query}` : "")
+    + (groupOpen ? ", GroupOpen=Yes" : "");
+}
+
+function settingsPeople(filter, query, applied) {
+  const term = query.trim().toLocaleLowerCase("ru");
+  return SETTINGS_PEOPLE.filter(([, name, role, removable]) => {
+    const actualRole = applied && name === SETTINGS_TARGET ? "Читатель" : role;
+    const groupMatches = filter === "Все" || (removable && actualRole === filter);
+    return groupMatches && (!term || name.toLocaleLowerCase("ru").includes(term));
+  });
+}
+
+async function buildGroupFilterMenu() {
+  const c = figma.createComponent(); c.name = "Group Filter Menu";
+  c.description = "Фильтр списка участников: Все / Редактор / Читатель.";
+  c.layoutMode = "VERTICAL"; hugHeight(c, 176);
+  c.paddingLeft = c.paddingRight = c.paddingTop = c.paddingBottom = 4;
+  c.itemSpacing = 2; c.cornerRadius = 10;
+  await fillWith(c, "Neutral/White"); await strokeWith(c, "UI/Border");
+  c.strokeWeight = 1; c.strokeAlign = "INSIDE"; c.effects = shadow(0.14, 8, 24);
+  for (const label of ["Все", "Редактор", "Читатель"]) {
+    const option = autoLayout("HORIZONTAL", { name: `filter / ${label}`,
+      paddingLeft: 12, paddingRight: 12, paddingTop: 10, paddingBottom: 10, cornerRadius: 6 });
+    option.appendChild(await text(label, "Body")); c.appendChild(option);
+    option.layoutSizingHorizontal = "FILL";
   }
-  const btns = autoLayout("HORIZONTAL", { name: "buttons", itemSpacing: 12 });
-  const save = button("Blue", "Сохранить"); save.name = "save";
-  const close = button("Blue", "Закрыть"); close.name = "close";
-  btns.appendChild(save); btns.appendChild(close);
-  c.appendChild(btns); btns.layoutSizingHorizontal = "FILL";
-  save.layoutSizingHorizontal = "FILL"; close.layoutSizingHorizontal = "FILL";
   return c;
 }
+
+async function buildBoardSettings(rowSet, pageNumber = 1, state = "Default", applied = false,
+  filter = "Все", query = "", groupOpen = false) {
+  const c = figma.createComponent();
+  c.name = settingsVariantName(pageNumber, state, applied, filter, query, groupOpen);
+  c.layoutMode = "VERTICAL"; hugHeight(c, 640);
+  c.paddingLeft = c.paddingRight = 32; c.paddingTop = c.paddingBottom = 28;
+  c.itemSpacing = 20; c.cornerRadius = 16; c.clipsContent = false;
+  await fillWith(c, "Neutral/White"); c.effects = shadow(0.2, 16, 48);
+  const head = autoLayout("HORIZONTAL", { name: "header", itemSpacing: 16, counterAxisAlignItems: "MIN" });
+  const heading = autoLayout("VERTICAL", { name: "heading", itemSpacing: 4 });
+  heading.appendChild(await text(`Параметры ${INC}`, "Heading"));
+  head.appendChild(heading); heading.layoutGrow = 1;
+  const close = autoLayout("HORIZONTAL", { name: "close", primaryAxisAlignItems: "CENTER",
+    counterAxisAlignItems: "CENTER", cornerRadius: 8 });
+  close.resize(40, 40); close.primaryAxisSizingMode = close.counterAxisSizingMode = "FIXED";
+  const closeIcon = icon.Close.createInstance(); recolorIcon(closeIcon, "UI/Secondary"); close.appendChild(closeIcon);
+  head.appendChild(close); c.appendChild(head); head.layoutSizingHorizontal = "FILL";
+  const groups = autoLayout("HORIZONTAL", { name: "groups", itemSpacing: 8, counterAxisAlignItems: "CENTER" });
+  const label = await text("Группы", "Heading"); groups.appendChild(label); label.layoutGrow = 1;
+  const groupSelect = autoLayout("HORIZONTAL", { name: "group filter", itemSpacing: 8,
+    paddingLeft: 12, paddingRight: 8, counterAxisAlignItems: "CENTER", cornerRadius: 8 });
+  groupSelect.resize(176, 40); groupSelect.primaryAxisSizingMode = groupSelect.counterAxisSizingMode = "FIXED";
+  await fillWith(groupSelect, "Neutral/White"); await strokeWith(groupSelect, "UI/Border");
+  groupSelect.strokeWeight = 1; groupSelect.strokeAlign = "INSIDE";
+  const filterValue = await text(filter, "Body"); groupSelect.appendChild(filterValue); filterValue.layoutGrow = 1;
+  const chevron = icon.ChevronDown.createInstance(); recolorIcon(chevron, "UI/Secondary");
+  groupSelect.appendChild(chevron); groups.appendChild(groupSelect);
+  c.appendChild(groups); groups.layoutSizingHorizontal = "FILL";
+  const participants = autoLayout("VERTICAL", { name: "participants", itemSpacing: 12 });
+  c.appendChild(participants); participants.layoutSizingHorizontal = "FILL";
+  const ph = autoLayout("HORIZONTAL", { name: "participants header", itemSpacing: 10, counterAxisAlignItems: "CENTER" });
+  ph.appendChild(await text("Участники", "Heading"));
+  const count = autoLayout("HORIZONTAL", { name: "participant count", paddingLeft: 8, paddingRight: 8,
+    paddingTop: 2, paddingBottom: 2, cornerRadius: 8 });
+  const visiblePeople = settingsPeople(filter, query, applied);
+  await fillWith(count, "UI/Surface"); count.appendChild(await text(String(visiblePeople.length), "Caption Medium", "UI/Secondary"));
+  ph.appendChild(count);
+  const spacer = figma.createFrame(); spacer.name = "spacer"; spacer.fills = []; spacer.resize(1, 1);
+  ph.appendChild(spacer); spacer.layoutGrow = 1;
+  const add = autoLayout("HORIZONTAL", { name: "add participant", primaryAxisAlignItems: "CENTER",
+    counterAxisAlignItems: "CENTER", cornerRadius: 10 });
+  add.resize(40, 40); add.primaryAxisSizingMode = add.counterAxisSizingMode = "FIXED";
+  await fillWith(add, "Neutral/White"); await strokeWith(add, "UI/Border");
+  add.strokeWeight = 1; add.strokeAlign = "INSIDE";
+  const plus = icon.Plus.createInstance(); recolorIcon(plus, "Neutral/Dark"); add.appendChild(plus);
+  ph.appendChild(add);
+  participants.appendChild(ph); ph.layoutSizingHorizontal = "FILL";
+  const search = autoLayout("HORIZONTAL", { name: "participant search", paddingLeft: 12,
+    paddingRight: 12, counterAxisAlignItems: "CENTER", cornerRadius: 8 });
+  search.resize(576, 40); search.primaryAxisSizingMode = search.counterAxisSizingMode = "FIXED";
+  await fillWith(search, "Neutral/White"); await strokeWith(search, "UI/Border");
+  search.strokeWeight = 1; search.strokeAlign = "INSIDE";
+  search.appendChild(await text(query || "Поиск участника по имени", "Body", query ? "Neutral/Dark" : "UI/Secondary"));
+  participants.appendChild(search); search.layoutSizingHorizontal = "FILL";
+  const list = autoLayout("VERTICAL", { name: "participant list", itemSpacing: 0 });
+  list.resize(576, SETTINGS_PAGE_SIZE * 64);
+  list.primaryAxisSizingMode = list.counterAxisSizingMode = "FIXED";
+  participants.appendChild(list); list.layoutSizingHorizontal = "FILL";
+  const start = (pageNumber - 1) * SETTINGS_PAGE_SIZE;
+  for (const [color, name, role, removable] of visiblePeople.slice(start, start + SETTINGS_PAGE_SIZE)) {
+    const isTarget = name === SETTINGS_TARGET;
+    const rowState = isTarget ? state : "Default";
+    const r = rowSet.children.find((v) => v.name === `State=${rowState}`).createInstance();
+    r.name = `row / ${name}`; setProp(r, "Name", name);
+    const av = r.findOne((n) => n.name === "avatar");
+    av.setProperties({ Color: color }); setProp(av, "Initials", initials(name));
+    const committed = isTarget && applied ? "Читатель" : role;
+    const value = isTarget && state === "Pending" ? (applied ? "Редактор" : "Читатель") : committed;
+    const group = r.findOne((n) => n.name === "group");
+    setProp(group, "Value", removable ? value : "Владелец");
+    if (!removable) {
+      await fillWith(group, "UI/Surface"); group.opacity = 0.6;
+      group.findOne((n) => n.name === "chevron").visible = false;
+      r.findOne((n) => n.name === "remove").opacity = 0;
+    }
+    list.appendChild(r); r.layoutSizingHorizontal = "FILL";
+  }
+  const nav = autoLayout("HORIZONTAL", { name: "pagination", itemSpacing: 8,
+    primaryAxisAlignItems: "SPACE_BETWEEN", counterAxisAlignItems: "CENTER" });
+  const rangeLabel = visiblePeople.length ? `${start + 1}–${Math.min(start + SETTINGS_PAGE_SIZE, visiblePeople.length)} из ${visiblePeople.length}` : "0 из 0";
+  const range = await text(rangeLabel, "Caption", "UI/Secondary");
+  const left = autoLayout("HORIZONTAL", { name: "visible range", counterAxisAlignItems: "CENTER" });
+  left.resize(148, 40); left.primaryAxisSizingMode = left.counterAxisSizingMode = "FIXED";
+  left.appendChild(range); nav.appendChild(left);
+  const controls = autoLayout("HORIZONTAL", { name: "page controls", itemSpacing: 12, counterAxisAlignItems: "CENTER" });
+  const previous = paginationArrow("previous page", true, pageNumber === 1 || state === "Pending");
+  controls.appendChild(previous);
+  const totalPages = Math.max(1, Math.ceil(visiblePeople.length / SETTINGS_PAGE_SIZE));
+  const pages = await text(`${pageNumber} из ${totalPages}`, "Caption Medium", "UI/Secondary");
+  pages.name = "page count"; controls.appendChild(pages);
+  const next = paginationArrow("next page", false, pageNumber === totalPages || state === "Pending");
+  controls.appendChild(next); nav.appendChild(controls);
+  const right = figma.createFrame(); right.name = "pagination balance"; right.resize(148, 40); right.fills = [];
+  nav.appendChild(right); participants.appendChild(nav); nav.layoutSizingHorizontal = "FILL";
+  return c;
+}
+
+async function buildBoardSettingsSet(rowSet) {
+  const variants = [];
+  for (const applied of [false, true]) {
+    for (let page = 1; page <= SETTINGS_PAGES; page++) variants.push(await buildBoardSettings(rowSet, page, "Default", applied));
+    variants.push(await buildBoardSettings(rowSet, 1, "Open", applied));
+    variants.push(await buildBoardSettings(rowSet, 1, "Pending", applied));
+  }
+  for (const [filter, query, page, groupOpen] of [
+    ["Все", "", 1, true], ["Редактор", "", 1, false], ["Редактор", "", 2, false],
+    ["Редактор", "", 1, true], ["Читатель", "", 1, false], ["Читатель", "", 1, true],
+    ["Все", "Ма", 1, false], ["Все", "Мак", 1, false],
+  ]) variants.push(await buildBoardSettings(rowSet, page, "Default", false, filter, query, groupOpen));
+  const set = figma.combineAsVariants(variants, figma.currentPage); set.name = "Board Parameters";
+  set.description = "По 5 участников на странице, фильтр групп и поиск по имени. State — Default / Open / Pending; Applied — роль Кирилла подтверждена. Последняя страница сохраняет высоту списка.";
+  gridSet(set, 3, 40, 32); return set;
+}
+
 
 async function buildToast() {
   const comps = [];
@@ -1828,7 +1982,9 @@ async function buildAppParts(place) {
   K.segmented = await buildSegmented();
   K.select = await buildSelect();
   K.participantRow = await buildParticipantRow(K.select);
-  K.boardSettings = await buildBoardSettings(K.participantRow);
+  K.roleMenu = await buildRoleMenu();
+  K.groupFilterMenu = await buildGroupFilterMenu();
+  K.boardSettings = await buildBoardSettingsSet(K.participantRow);
   K.toast = await buildToast();
   const box = autoLayout("HORIZONTAL", { name: "collaboration", itemSpacing: 64, counterAxisAlignItems: "MIN" });
   const left = autoLayout("VERTICAL", { name: "parts", itemSpacing: 40 });
@@ -1837,9 +1993,11 @@ async function buildAppParts(place) {
   left.appendChild(await labeled("Segmented", K.segmented));
   left.appendChild(await labeled("Select", K.select));
   left.appendChild(await labeled("Participant Row", K.participantRow));
+  left.appendChild(await labeled("Role Menu", K.roleMenu));
+  left.appendChild(await labeled("Group Filter Menu", K.groupFilterMenu));
   left.appendChild(await labeled("Toast", K.toast));
   box.appendChild(left);
-  box.appendChild(await labeled("Board Parameters", K.boardSettings));
+  box.appendChild(await labeled("Board Parameters · страницы и состояния", K.boardSettings));
   await place("Совместная работа", "Участники, ссылка и группы Редактор / Читатель", box);
 }
 
@@ -1861,7 +2019,26 @@ const SCREENS = {
   s2: ["2", "Страница «Доска»", "Активные доски и архив в раскрывающихся разделах. В каждом разделе есть сортировка по дате."],
   s3: ["3", "Новая доска", "Доска создаётся пустой, «Без названия», с уникальной ссылкой. Название задаётся в шапке."],
   s4: ["4", "Название задано", "Обычно название — номер аварии. Группы участников настраиваются в «Параметрах»."],
-  s5: ["5", "Параметры", "Базовые группы Редактор и Читатель. Участнику можно выбрать другую группу."],
+  s5: ["5", "Параметры · страница 1", "По 5 участников на странице. Откройте список роли у Буякова Кирилла."],
+  s5p2: ["5.2", "Участники · страница 2", "Участники 6–10. Стрелки по центру переключают страницы."],
+  s5p3: ["5.3", "Участники · страница 3", "Участники 11–12. Высота списка сохранена, правая стрелка неактивна."],
+  s5open: ["5а", "Список ролей раскрыт", "Выберите «Читатель»."],
+  s5pending: ["5б", "Новая роль выбрана", "Роль ещё не применена. Галочка вместо крестика подтверждает изменение."],
+  s5saved: ["5в", "Роль подтверждена", "Нажатие на галочку применило роль «Читатель». Строка вернулась в обычное состояние."],
+  s5savedp2: ["5в.2", "Страница 2 · после изменения", "Пролистывание сохраняет подтверждённую роль Кирилла."],
+  s5savedp3: ["5в.3", "Страница 3 · после изменения", "Вернитесь на первую страницу: подтверждённая роль сохранена."],
+  s5savedopen: ["5г", "Повторная смена роли", "Текущая роль — «Читатель». Можно снова выбрать «Редактор»."],
+  s5revert: ["5д", "Возврат роли ожидает подтверждения", "Галочка применяет роль «Редактор». Закрытие окна отменяет неподтверждённый выбор."],
+  s5board: ["5е", "Параметры закрыты", "Вернитесь в параметры или поделитесь ссылкой на доску."],
+  s5boardSaved: ["5ж", "Параметры закрыты · роль сохранена", "Подтверждённая роль сохраняется при повторном открытии параметров."],
+  s5groupopen: ["5з", "Фильтр групп раскрыт", "Выберите: Все, Редактор или Читатель."],
+  s5editors: ["5и", "Фильтр · редакторы", "Показаны только редакторы; владелец имеет отдельную роль."],
+  s5editorsp2: ["5и.2", "Редакторы · страница 2", "Оставшиеся редакторы на второй странице."],
+  s5editorsopen: ["5и.3", "Смена фильтра редакторов", "Выберите другой фильтр групп."],
+  s5readers: ["5к", "Фильтр · читатели", "Показаны только читатели."],
+  s5readersopen: ["5к.2", "Смена фильтра читателей", "Выберите другой фильтр групп."],
+  s5searchma: ["5л", "Поиск · «Ма»", "По мере ввода список показывает подходящих участников."],
+  s5searchmak: ["5м", "Поиск · «Мак»", "Следующая буква сужает список без отдельной кнопки поиска."],
   s8: ["6", "Ссылка в чате КС", "Дежурный отправил ссылку в чат. Участник с корпоративной учётной записью открывает её."],
   s10: ["7", "Работа на доске", "Участники работают вместе и видят курсоры друг друга. Загрузим регламент."],
   s12: ["8", "Файлы на доске", "После выбора файла в проводнике первая страница Word готова, вторая загружается. Дальше — таблица."],
@@ -2178,6 +2355,89 @@ function topToast(f, type, label) {
   return t;
 }
 
+// Applied tracks the committed role across pagination; Pending only changes the displayed draft.
+const SETTINGS_VIEWS = [
+  ["s5", 1, "Default", false], ["s5p2", 2, "Default", false], ["s5p3", 3, "Default", false],
+  ["s5open", 1, "Open", false], ["s5pending", 1, "Pending", false],
+  ["s5saved", 1, "Default", true], ["s5savedp2", 2, "Default", true], ["s5savedp3", 3, "Default", true],
+  ["s5savedopen", 1, "Open", true], ["s5revert", 1, "Pending", true],
+  ["s5groupopen", 1, "Default", false, "Все", "", true],
+  ["s5editors", 1, "Default", false, "Редактор"],
+  ["s5editorsp2", 2, "Default", false, "Редактор"],
+  ["s5editorsopen", 1, "Default", false, "Редактор", "", true],
+  ["s5readers", 1, "Default", false, "Читатель"],
+  ["s5readersopen", 1, "Default", false, "Читатель", "", true],
+  ["s5searchma", 1, "Default", false, "Все", "Ма"],
+  ["s5searchmak", 1, "Default", false, "Все", "Мак"],
+];
+
+async function buildSettingsScreens() {
+  for (const [key, page, state, applied, filter = "Все", query = "", groupOpen = false] of SETTINGS_VIEWS) {
+    const { f, sh } = await boardBase(key, { people: 4 });
+    const overflow = find(sh, "more").findOne((n) => n.type === "TEXT");
+    overflow.characters = `+${SETTINGS_PEOPLE.length - SHARE_PEOPLE.length}`;
+    await boardContent(f); overlay(f);
+    const name = settingsVariantName(page, state, applied, filter, query, groupOpen);
+    const m = K.boardSettings.children.find((v) => v.name === name).createInstance();
+    put(f, m, (SW - m.width) / 2, (SH - m.height) / 2);
+    const base = filter === "Редактор" ? "s5editors" : filter === "Читатель" ? "s5readers" : applied ? "s5saved" : "s5";
+    const pageKeys = filter === "Редактор" ? ["s5editors", "s5editorsp2"]
+      : filter === "Читатель" ? ["s5readers"]
+      : applied ? ["s5saved", "s5savedp2", "s5savedp3"] : ["s5", "s5p2", "s5p3"];
+    // Close never commits a pending choice. Reopening keeps the last applied role.
+    hotspot(f, boxIn(f, find(m, "close")), applied ? "s5boardSaved" : "s5board", 0);
+    if (state !== "Pending") {
+      if (page > 1) hotspot(f, boxIn(f, find(m, "previous page")), pageKeys[page - 2], 0);
+      if (page < pageKeys.length && !query) hotspot(f, boxIn(f, find(m, "next page")), pageKeys[page], 0);
+    }
+    if (!applied) {
+      if (groupOpen) {
+        hotspot(f, { x: 0, y: 0, w: SW, h: SH }, base, 0);
+        const selectorBox = boxIn(f, find(m, "group filter"));
+        const menu = K.groupFilterMenu.createInstance();
+        put(f, menu, selectorBox.x, selectorBox.y + selectorBox.h + 4);
+        for (const [label, dest] of [["Все", "s5"], ["Редактор", "s5editors"], ["Читатель", "s5readers"]])
+          hotspot(f, boxIn(f, find(menu, `filter / ${label}`)), dest, 0);
+      } else {
+        const open = filter === "Редактор" ? "s5editorsopen" : filter === "Читатель" ? "s5readersopen" : "s5groupopen";
+        hotspot(f, boxIn(f, find(m, "group filter")), open, 0);
+      }
+      if (!groupOpen) {
+        const nextQuery = query === "Ма" ? "s5searchmak" : query ? null : "s5searchma";
+        if (nextQuery) hotspot(f, boxIn(f, find(m, "participant search")), nextQuery, 0);
+      }
+    }
+    if (page !== 1) continue;
+    const row = find(m, `row / ${SETTINGS_TARGET}`);
+    if (!row) continue;
+    const selectBox = boxIn(f, find(row, "group"));
+    if (state === "Default") {
+      hotspot(f, selectBox, applied ? "s5savedopen" : "s5open", 0);
+      if (applied) topToast(f, "Success", "Буяков Кирилл — теперь Читатель");
+    } else if (state === "Open") {
+      // A transparent dismissal layer is below the popup and above all underlying hotspots.
+      hotspot(f, { x: 0, y: 0, w: SW, h: SH }, base, 0);
+      const menu = K.roleMenu.children.find((v) => v.name === `Selected=${applied ? "Читатель" : "Редактор"}`).createInstance();
+      put(f, menu, selectBox.x, selectBox.y + selectBox.h + 4);
+      hotspot(f, boxIn(f, find(menu, "option / Редактор")), applied ? "s5revert" : "s5", 0);
+      hotspot(f, boxIn(f, find(menu, "option / Читатель")), applied ? "s5saved" : "s5pending", 0);
+    } else {
+      hotspot(f, boxIn(f, find(row, "confirm")), applied ? "s5" : "s5saved", 0);
+      hotspot(f, selectBox, applied ? "s5savedopen" : "s5open", 0);
+    }
+  }
+  // Closing the modal returns to the board, with a path back to the same committed role.
+  for (const applied of [false, true]) {
+    const { f, h, tb, sh } = await boardBase(applied ? "s5boardSaved" : "s5board", { people: 4 });
+    find(sh, "more").findOne((n) => n.type === "TEXT").characters = `+${SETTINGS_PEOPLE.length - SHARE_PEOPLE.length}`;
+    await boardContent(f);
+    const menu = openBoardMenu(f, h, tb);
+    hotspot(f, boxIn(f, find(menu, "Параметры")), applied ? "s5saved" : "s5", 0);
+    hotspot(f, boxIn(f, find(menu, "Поделиться")), "s8", 0);
+  }
+}
+
+
 // ---- экраны основного сценария
 async function buildMainScreens() {
   // 1. Меню СППР
@@ -2223,17 +2483,8 @@ async function buildMainScreens() {
     await point(f, b, "right", "Параметры доски");
     hotspot(f, b, "s5");
   }
-  // 5. Параметры доски
-  {
-    const { f } = await boardBase("s5", { people: 4 });
-    await boardContent(f);
-    overlay(f);
-    const m = K.boardSettings.createInstance();
-    put(f, m, (SW - m.width) / 2, (SH - m.height) / 2);
-    const row = find(m, "row / Буяков Кирилл");
-    await point(f, boxIn(f, find(row, "group")), "right", "Выбрать группу");
-    hotspot(f, boxIn(f, find(m, "save")), "s8");
-  }
+  // 5. Параметры: страницы, раскрытие списка и подтверждение роли
+  await buildSettingsScreens();
   // 6. Ссылка в чате КС
   {
     const f = uxScreen("s8");
@@ -2676,13 +2927,22 @@ async function buildUxFlow() {
   const map = await buildMap();
   page.appendChild(map); map.x = 0; map.y = y0;
   let y = y0 + map.height + 400;
-  const main = ["s1", "s2", "s3", "s4", "s5", "s8", "s10", "s12", "s13", "s14", "s15", "s16", "s17"];
-  for (let i = 0; i < main.length; i += 5) {
-    const part = main.slice(i, i + 5);
-    y = (await placeRow(page, i === 0 ? "Основной сценарий — создание доски из меню" : `Основной сценарий — экраны ${SCREENS[part[0]][0]}–${SCREENS[part[part.length - 1]][0]}`, part, 0, y)) + 360;
-  }
-  y = (await placeRow(page, "Ветка: нет роли «Дежурный»", ["s1a"], 0, y)) + 360;
-  await placeRow(page, "Альтернативный сценарий — доска вместе с КС из Оповещателя", ["a1", "a2", "a3"], 0, y);
+  const rows = [
+    ["Основной сценарий — создание доски из меню", ["s1", "s2", "s3", "s4"]],
+    ["Параметры — выбор и подтверждение роли участника", ["s5", "s5open", "s5pending", "s5saved"]],
+    ["Участники — страницы 2 и 3", ["s5p2", "s5p3"]],
+    ["Фильтр групп — Все, Редактор, Читатель", ["s5groupopen", "s5editors", "s5editorsp2", "s5readers"]],
+    ["Смена выбранной группы", ["s5editorsopen", "s5readersopen"]],
+    ["Поиск обновляет список по мере ввода", ["s5searchma", "s5searchmak"]],
+    ["Подтверждённая роль сохраняется при перелистывании", ["s5savedp2", "s5savedp3"]],
+    ["Повторная смена роли", ["s5savedopen", "s5revert"]],
+    ["Возврат на доску — параметры и приглашение", ["s5board", "s5boardSaved"]],
+    ["Основной сценарий — совместная работа", ["s8", "s10", "s12", "s13", "s14"]],
+    ["Основной сценарий — завершение работы", ["s15", "s16", "s17"]],
+    ["Ветка: нет роли «Дежурный»", ["s1a"]],
+    ["Альтернативный сценарий — доска вместе с КС из Оповещателя", ["a1", "a2", "a3"]],
+  ];
+  for (const [title, keys] of rows) y = (await placeRow(page, title, keys, 0, y)) + 360;
 
   // прототип: переходы по нажатию и стартовые точки
   let ok = 0, failed = 0;
@@ -2700,6 +2960,7 @@ async function buildUxFlow() {
       { nodeId: UX.map.id, name: "Карта сценария" },
       { nodeId: UX.s1.id, name: "Основной сценарий" },
       { nodeId: UX.a1.id, name: "Сценарий из Оповещателя" },
+      { nodeId: UX.s5.id, name: "Параметры · участники и роли" },
     ];
   } catch (e) { failed++; }
   return { page, ok, failed, shared };

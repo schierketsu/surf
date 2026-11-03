@@ -1,9 +1,0 @@
-{
-  "name": "Board UI Kit v7.23",
-  "id": "board-ui-kit-v7-23",
-  "api": "1.0.0",
-  "main": "board-ui-kit-v7.js",
-  "editorType": ["figma"],
-  "documentAccess": "dynamic-page",
-  "networkAccess": { "allowedDomains": ["none"] }
-}
