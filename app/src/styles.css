@@ -1,0 +1,65 @@
+:root {
+  font-family: Inter, Arial, sans-serif;
+  color-scheme: light;
+  --page-background: #f2f2f2;
+  --surface: #ffffff;
+  --text: #272727;
+  --border: #dde3ec;
+  --canvas-background: #f2f2f2;
+  --canvas-line: #e9e9e9;
+  --canvas-line-strong: #dfdfdf;
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --page-background: #343434;
+  --surface: #404040;
+  --text: #f3f5f8;
+  --border: #575757;
+  --canvas-background: #343434;
+  --canvas-line: #403939;
+  --canvas-line-strong: #624442;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--page-background);
+  color: var(--text);
+}
+
+button {
+  font: inherit;
+}
+
+.app-shell {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  height: 100dvh;
+  overflow: hidden;
+}
+
+.board {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+.board-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: var(--canvas-background);
+}
+
