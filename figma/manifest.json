@@ -1,8 +1,8 @@
 {
-  "name": "Board UI Kit v7.26",
-  "id": "board-ui-kit-v7-23",
+  "name": "figma",
+  "id": "figma",
   "api": "1.0.0",
-  "main": "board-ui-kit-v7.js",
+  "main": "figma.js",
   "editorType": [
     "figma"
   ],
