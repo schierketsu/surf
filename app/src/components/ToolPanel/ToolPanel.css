@@ -1,0 +1,42 @@
+.tool-panel {
+  position: absolute;
+  top: 50%;
+  left: 16px;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  width: 44px;
+  padding: 9px 4px;
+  border-radius: var(--control-radius);
+  background: var(--control-background);
+  box-shadow: var(--control-shadow);
+  transform: translateY(-50%);
+}
+
+.tool-panel button {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--control-text);
+  font-size: 16px;
+  font-weight: 700;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.tool-panel button:hover {
+  background: var(--control-hover);
+}
+
+.tool-panel button:focus-visible {
+  outline: 2px solid #0057ff;
+  outline-offset: 2px;
+}

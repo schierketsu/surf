@@ -1,0 +1,54 @@
+.zoom-controls {
+  position: absolute;
+  right: 16px;
+  bottom: 16px;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100px;
+  height: 44px;
+  padding: 4px 9px;
+  border-radius: var(--control-radius);
+  background: var(--control-background);
+  box-shadow: var(--control-shadow);
+}
+
+.zoom-controls button {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.zoom-controls img {
+  display: block;
+  width: 18px;
+  height: 18px;
+  object-fit: contain;
+  pointer-events: none;
+}
+
+.zoom-controls button:hover:not(:disabled) {
+  background: var(--control-hover);
+}
+
+.zoom-controls button:disabled {
+  cursor: default;
+}
+
+.zoom-controls button:disabled img {
+  opacity: 0.35;
+}
+
+.zoom-controls button:focus-visible {
+  outline: 2px solid #0057ff;
+  outline-offset: 2px;
+}

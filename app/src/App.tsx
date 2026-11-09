@@ -1,6 +1,7 @@
 import { useLayoutEffect, useState } from 'react'
 import BoardCanvas from './BoardCanvas'
-import ThemeToggle from './components/ThemeToggle'
+import TemplateControl from './components/TemplateControl/TemplateControl'
+import ThemeToggle from './components/ThemeToggle/ThemeToggle'
 import { applyTheme, getInitialTheme, type Theme } from './theme'
 
 export default function App() {
@@ -13,6 +14,7 @@ export default function App() {
   return (
     <div className="app-shell">
       <BoardCanvas theme={theme} />
+      <TemplateControl />
       <ThemeToggle theme={theme} onToggle={() => setTheme(theme === 'light' ? 'dark' : 'light')} />
     </div>
   )

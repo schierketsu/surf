@@ -1,0 +1,53 @@
+.template-control {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 44px;
+  padding: 4px 9px 4px 20px;
+  border-radius: var(--control-radius);
+  background: var(--control-background);
+  box-shadow: var(--control-shadow);
+  color: var(--control-text);
+}
+
+.template-control__label {
+  font-size: 14px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.template-control__more {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.template-control__more img {
+  display: block;
+  width: 18px;
+  height: 18px;
+  object-fit: contain;
+  pointer-events: none;
+}
+
+.template-control__more:hover {
+  background: var(--control-hover);
+}
+
+.template-control__more:focus-visible {
+  outline: 2px solid #0057ff;
+  outline-offset: 2px;
+}

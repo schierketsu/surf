@@ -8,6 +8,11 @@
   --canvas-background: #f2f2f2;
   --canvas-line: #e9e9e9;
   --canvas-line-strong: #dfdfdf;
+  --control-background: #ffffff;
+  --control-hover: #f4f4f4;
+  --control-text: #202020;
+  --control-radius: 16px;
+  --control-shadow: 0 2px 12px rgb(0 0 0 / 8%);
 }
 
 :root[data-theme='dark'] {
@@ -17,8 +22,8 @@
   --text: #f3f5f8;
   --border: #575757;
   --canvas-background: #343434;
-  --canvas-line: #403939;
-  --canvas-line-strong: #624442;
+  --canvas-line: #3b4d5d;
+  --canvas-line-strong: #4c687f;
 }
 
 * {
@@ -51,15 +56,25 @@ button {
 }
 
 .board {
+  position: relative;
   width: 100%;
   height: 100%;
   overflow: hidden;
+  background: var(--canvas-background);
 }
 
 .board-canvas {
   display: block;
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
   background: var(--canvas-background);
+  cursor: grab;
+  touch-action: none;
+}
+
+.board-canvas.is-dragging {
+  cursor: grabbing;
 }
 

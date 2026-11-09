@@ -1,4 +1,4 @@
-import type { Theme } from '../theme'
+import type { Theme } from '../../theme'
 import sunIcon from './icons/sun.png'
 import moonIcon from './icons/moon.png'
 import './ThemeToggle.css'
@@ -21,11 +21,8 @@ export default function ThemeToggle({ theme, onToggle }: ThemeToggleProps) {
       title={isDark ? 'Включить светлую тему' : 'Включить тёмную тему'}
       onClick={onToggle}
     >
-      <span className="theme-toggle__track" aria-hidden="true">
-        <span className="theme-toggle__thumb" />
-        <img className="theme-toggle__icon theme-toggle__icon--sun" src={sunIcon} alt="" />
-        <img className="theme-toggle__icon theme-toggle__icon--moon" src={moonIcon} alt="" />
-      </span>
+      <img className="theme-toggle__icon theme-toggle__icon--sun" src={sunIcon} alt="" aria-hidden="true" />
+      <img className="theme-toggle__icon theme-toggle__icon--moon" src={moonIcon} alt="" aria-hidden="true" />
     </button>
   )
 }
