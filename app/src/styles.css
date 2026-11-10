@@ -1,5 +1,22 @@
+@font-face {
+  font-family: 'Doska';
+  src: url('/fonts/Regular.otf') format('opentype');
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Doska';
+  src: url('/fonts/Bold.otf') format('opentype');
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+}
+
 :root {
-  font-family: Inter, Arial, sans-serif;
+  font-family: 'Doska', Arial, sans-serif;
+  font-weight: 400;
   color-scheme: light;
   --page-background: #f2f2f2;
   --surface: #ffffff;
@@ -13,17 +30,6 @@
   --control-text: #202020;
   --control-radius: 16px;
   --control-shadow: 0 2px 12px rgb(0 0 0 / 8%);
-}
-
-:root[data-theme='dark'] {
-  color-scheme: dark;
-  --page-background: #343434;
-  --surface: #404040;
-  --text: #f3f5f8;
-  --border: #575757;
-  --canvas-background: #343434;
-  --canvas-line: #3b4d5d;
-  --canvas-line-strong: #4c687f;
 }
 
 * {
@@ -45,6 +51,15 @@ body {
 
 button {
   font: inherit;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  font-weight: 700;
 }
 
 .app-shell {

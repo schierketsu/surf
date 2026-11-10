@@ -1,21 +1,79 @@
-.tool-panel {
+.tool-panel-root {
+  --tool-panel-width: 44px;
   position: absolute;
   top: 50%;
   left: 16px;
-  z-index: 1;
+  z-index: 2;
+  transform: translateY(-50%);
+}
+
+.tool-panel {
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 10px;
-  width: 44px;
+  width: var(--tool-panel-width);
   padding: 9px 4px;
   border-radius: var(--control-radius);
   background: var(--control-background);
   box-shadow: var(--control-shadow);
-  transform: translateY(-50%);
 }
 
-.tool-panel button {
+.tool-panel__navigation {
+  position: absolute;
+  bottom: calc(100% + 12px);
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  width: var(--tool-panel-width);
+  height: 100px;
+  padding: 9px 4px;
+  border: 0;
+  border-radius: var(--control-radius);
+  background: var(--control-background);
+  box-shadow: var(--control-shadow);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.tool-panel__navigation-slot {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 36px;
+  height: 36px;
+}
+
+.tool-panel__navigation:hover {
+  background: var(--control-hover);
+}
+
+.tool-panel__navigation-icon {
+  display: block;
+  flex: none;
+  width: 22px;
+  height: 22px;
+  object-fit: contain;
+  filter: brightness(0);
+  opacity: 0.35;
+  pointer-events: none;
+  transition: opacity 180ms ease;
+}
+
+.tool-panel__navigation-icon--hand {
+  width: 20px;
+  height: 20px;
+}
+
+.tool-panel__navigation[data-mode='cursor'] .tool-panel__navigation-icon--cursor,
+.tool-panel__navigation[data-mode='hand'] .tool-panel__navigation-icon--hand {
+  opacity: 1;
+}
+
+.tool-panel__button,
+.tool-panel__option {
   display: grid;
   place-items: center;
   flex: none;
@@ -26,17 +84,116 @@
   border-radius: 10px;
   background: transparent;
   color: var(--control-text);
-  font-size: 16px;
-  font-weight: 700;
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
 }
 
-.tool-panel button:hover {
+.tool-panel__button:hover,
+.tool-panel__option:hover {
   background: var(--control-hover);
 }
 
-.tool-panel button:focus-visible {
+.tool-panel__button[data-active='true'],
+.tool-panel__option[aria-pressed='true'] {
+  background: #e3ebf0;
+  color: #3b4d5d;
+}
+
+.tool-panel__button:focus-visible,
+.tool-panel__option:focus-visible,
+.tool-panel__swatch:focus-visible {
   outline: 2px solid #0057ff;
   outline-offset: 2px;
+}
+
+.tool-panel__navigation:focus-visible {
+  outline: 2px solid #0057ff;
+  outline-offset: 4px;
+}
+
+.tool-panel__icon,
+.tool-panel__sticker-icon {
+  display: block;
+}
+
+.tool-panel__sticker-icon {
+  width: 22px;
+  height: 22px;
+  object-fit: contain;
+  pointer-events: none;
+}
+
+.tool-panel__icon {
+  width: 19px;
+  height: 19px;
+  background: currentColor;
+  mask-position: center;
+  mask-repeat: no-repeat;
+  mask-size: contain;
+  -webkit-mask-position: center;
+  -webkit-mask-repeat: no-repeat;
+  -webkit-mask-size: contain;
+}
+
+.tool-panel__icon--pencil {
+  mask-image: url('./icons/pencil.png');
+  -webkit-mask-image: url('./icons/pencil.png');
+}
+
+.tool-panel__icon--highlighter {
+  mask-image: url('./icons/highlighter.png');
+  -webkit-mask-image: url('./icons/highlighter.png');
+}
+
+.tool-panel__icon--text {
+  mask-image: url('./icons/text.png');
+  -webkit-mask-image: url('./icons/text.png');
+}
+
+.tool-panel__popover {
+  position: absolute;
+  left: calc(100% + 8px);
+  z-index: 1;
+  border-radius: var(--control-radius);
+  background: var(--control-background);
+  box-shadow: var(--control-shadow);
+}
+
+.tool-panel__popover--drawing {
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  width: var(--tool-panel-width);
+  padding: 9px 4px;
+}
+
+.tool-panel__popover--stickers {
+  top: 50%;
+  display: grid;
+  grid-template-columns: repeat(2, 44px);
+  gap: 8px;
+  width: max-content;
+  max-height: calc(100dvh - 32px);
+  padding: 10px;
+  overflow-y: auto;
+  transform: translateY(-50%);
+}
+
+.tool-panel__swatch {
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 1px solid;
+  border-radius: 0;
+  box-shadow: 0 2px 5px rgb(0 0 0 / 12%);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tool-panel__navigation-icon {
+    transition: none;
+  }
 }

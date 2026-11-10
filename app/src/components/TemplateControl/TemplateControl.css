@@ -7,7 +7,7 @@
   align-items: center;
   gap: 8px;
   height: 44px;
-  padding: 4px 9px 4px 20px;
+  padding: 4px 20px 4px 9px;
   border-radius: var(--control-radius);
   background: var(--control-background);
   box-shadow: var(--control-shadow);

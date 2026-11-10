@@ -2,9 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import ToolPanel from './components/ToolPanel/ToolPanel'
 import ZoomControls from './components/ZoomControls/ZoomControls'
 import { BOARD_HEIGHT, BOARD_WIDTH, MINI_CELLS_PER_SIDE, gridLevelForScale, visitVisibleCells, type WorldRect } from './gridHierarchy'
-import type { Theme } from './theme'
 
-type BoardCanvasProps = { theme: Theme }
 type View = { scale: number; x: number; y: number }
 
 const MAX_SCALE = 4
@@ -34,17 +32,12 @@ function keepBoardInView(view: View, width: number, height: number): View {
   }
 }
 
-export default function BoardCanvas({ theme }: BoardCanvasProps) {
+export default function BoardCanvas() {
   const boardRef = useRef<HTMLElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const viewRef = useRef<View | null>(null)
-  const drawRef = useRef<() => void>(() => {})
   const zoomRef = useRef<(factor: number) => void>(() => {})
   const [zoomLimits, setZoomLimits] = useState({ atMin: false, atMax: false })
-
-  useEffect(() => {
-    drawRef.current()
-  }, [theme])
 
   useEffect(() => {
     const board = boardRef.current
@@ -162,8 +155,6 @@ export default function BoardCanvas({ theme }: BoardCanvasProps) {
         draw()
       })
     }
-    drawRef.current = scheduleDraw
-
     const applyView = (view: View) => {
       viewRef.current = view
       scheduleDraw()
@@ -273,7 +264,6 @@ export default function BoardCanvas({ theme }: BoardCanvasProps) {
       observer.disconnect()
       window.removeEventListener('resize', resize)
       if (frame !== null) window.cancelAnimationFrame(frame)
-      drawRef.current = () => {}
       board.removeEventListener('wheel', onWheel)
       canvas.removeEventListener('pointerdown', onPointerDown)
       canvas.removeEventListener('pointermove', onPointerMove)
