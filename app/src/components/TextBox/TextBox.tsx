@@ -8,7 +8,8 @@ export const MIN_TEXT_WIDTH = 150
 export const MIN_TEXT_HEIGHT = 32
 
 type Corner = 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right'
-type Gesture = { mode: 'move' | 'resize'; pointerId: number; corner?: Corner; clientX: number; clientY: number; start: TextItem }
+type Edge = 'top' | 'right' | 'bottom' | 'left'
+type Gesture = { mode: 'move' | 'resize'; pointerId: number; corner?: Corner; edge?: Edge; clientX: number; clientY: number; start: TextItem; moved: boolean }
 
 const CORNERS = [
   { corner: 'top-left', label: 'верхний левый' },
@@ -16,6 +17,27 @@ const CORNERS = [
   { corner: 'bottom-left', label: 'нижний левый' },
   { corner: 'bottom-right', label: 'нижний правый' },
 ] as const
+
+const EDGES = [
+  { edge: 'top', label: 'верхняя' },
+  { edge: 'right', label: 'правая' },
+  { edge: 'bottom', label: 'нижняя' },
+  { edge: 'left', label: 'левая' },
+] as const
+
+function isOverWrittenText(editor: HTMLDivElement, x: number, y: number) {
+  if (!editor.textContent?.trim()) return false
+  const walker = document.createTreeWalker(editor, NodeFilter.SHOW_TEXT)
+  const range = document.createRange()
+  let node: Node | null
+  while ((node = walker.nextNode())) {
+    range.selectNodeContents(node)
+    for (const rect of range.getClientRects()) {
+      if (x >= rect.left - 2 && x <= rect.right + 2 && y >= rect.top - 2 && y <= rect.bottom + 2) return true
+    }
+  }
+  return false
+}
 
 export type TextItem = {
   id: string
@@ -43,9 +65,11 @@ type TextBoxProps = {
   selected: boolean
   groupSelected: boolean
   interactive: boolean
+  editing: boolean
   focusOnMount: boolean
   scale: number
   onSelect: (id: string) => void
+  onEdit: (id: string) => void
   onChange: (id: string, changes: Partial<TextItem>) => void
   onCommit: (id: string, html: string, isEmpty: boolean) => void
   onDismiss: () => void
@@ -53,9 +77,10 @@ type TextBoxProps = {
   onSaveSelection: () => void
 }
 
-export default function TextBox({ item, selected, groupSelected, interactive, focusOnMount, scale, onSelect, onChange, onCommit, onDismiss, onEditorRef, onSaveSelection }: TextBoxProps) {
+export default function TextBox({ item, selected, groupSelected, interactive, editing, focusOnMount, scale, onSelect, onEdit, onChange, onCommit, onDismiss, onEditorRef, onSaveSelection }: TextBoxProps) {
   const editorRef = useRef<HTMLDivElement | null>(null)
   const gesture = useRef<Gesture | null>(null)
+  const focusPoint = useRef<{ x: number; y: number } | null>(null)
   const measureHeightRef = useRef<() => void>(() => {})
 
   measureHeightRef.current = () => {
@@ -67,6 +92,12 @@ export default function TextBox({ item, selected, groupSelected, interactive, fo
       onChange(item.id, { height, y })
     }
   }
+
+  useLayoutEffect(() => {
+    const editor = editorRef.current
+    if (!editor || document.activeElement === editor || editor.innerHTML === item.html) return
+    editor.innerHTML = item.html
+  }, [item.html])
 
   useLayoutEffect(() => {
     measureHeightRef.current()
@@ -87,17 +118,27 @@ export default function TextBox({ item, selected, groupSelected, interactive, fo
       if (!editor.isConnected) return
       editor.focus()
       const selection = window.getSelection()
+      const point = focusPoint.current
+      focusPoint.current = null
+      if (point && selection) {
+        const range = document.caretRangeFromPoint?.(point.x, point.y)
+        if (range && editor.contains(range.startContainer)) {
+          selection.removeAllRanges()
+          selection.addRange(range)
+          return
+        }
+      }
       selection?.selectAllChildren(editor)
       selection?.collapseToEnd()
     })
     return () => window.cancelAnimationFrame(frame)
   }, [focusOnMount])
 
-  const startGesture = (event: React.PointerEvent<HTMLButtonElement>, mode: 'move' | 'resize', corner?: Corner) => {
+  const startGesture = (event: React.PointerEvent<HTMLButtonElement>, mode: 'move' | 'resize', corner?: Corner, edge?: Edge) => {
     event.preventDefault()
     event.stopPropagation()
     if (!groupSelected || mode !== 'move') onSelect(item.id)
-    gesture.current = { mode, pointerId: event.pointerId, corner, clientX: event.clientX, clientY: event.clientY, start: { ...item } }
+    gesture.current = { mode, pointerId: event.pointerId, corner, edge, clientX: event.clientX, clientY: event.clientY, start: { ...item }, moved: false }
     event.currentTarget.setPointerCapture(event.pointerId)
   }
 
@@ -109,29 +150,51 @@ export default function TextBox({ item, selected, groupSelected, interactive, fo
     const start = current.start
 
     if (current.mode === 'move') {
+      if (!current.moved && Math.hypot(event.clientX - current.clientX, event.clientY - current.clientY) < 4) return
+      current.moved = true
       onChange(item.id, { x: start.x + dx, y: start.y + dy })
       return
     }
 
-    const corner = current.corner!
-    const fromLeft = corner.endsWith('left')
-    const fromTop = corner.startsWith('top')
-    const horizontal = dx * (fromLeft ? -1 : 1)
-    const vertical = dy * (fromTop ? -1 : 1)
-    const factor = 1 + (horizontal * start.width + vertical * start.height)
-      / (start.width ** 2 + start.height ** 2)
-    const anchorX = fromLeft ? start.x + start.width : start.x
-    const anchorY = fromTop ? start.y + start.height : start.y
-    const maxWidth = fromLeft ? anchorX : BOARD_WIDTH - anchorX
-    const maxHeight = fromTop ? anchorY : BOARD_HEIGHT - anchorY
+    let anchorX: number
+    let anchorY: number
+    let factor: number
+    if (current.edge) {
+      const edge = current.edge
+      anchorX = edge === 'left' ? start.x + start.width : edge === 'right' ? start.x : start.x + start.width / 2
+      anchorY = edge === 'top' ? start.y + start.height : edge === 'bottom' ? start.y : start.y + start.height / 2
+      factor = 1 + (edge === 'left' ? -dx / start.width : edge === 'right' ? dx / start.width
+        : edge === 'top' ? -dy / start.height : dy / start.height)
+    } else {
+      const corner = current.corner!
+      const fromLeft = corner.endsWith('left')
+      const fromTop = corner.startsWith('top')
+      anchorX = fromLeft ? start.x + start.width : start.x
+      anchorY = fromTop ? start.y + start.height : start.y
+      const horizontal = dx * (fromLeft ? -1 : 1)
+      const vertical = dy * (fromTop ? -1 : 1)
+      factor = 1 + (horizontal * start.width + vertical * start.height)
+        / (start.width ** 2 + start.height ** 2)
+    }
     const minFactor = Math.max(MIN_FONT_SIZE / start.fontSize, MIN_TEXT_WIDTH / start.width, MIN_TEXT_HEIGHT / start.height)
-    const maxFactor = Math.min(MAX_FONT_SIZE / start.fontSize, maxWidth / start.width, maxHeight / start.height)
+    const leftDistance = anchorX - start.x
+    const rightDistance = start.x + start.width - anchorX
+    const topDistance = anchorY - start.y
+    const bottomDistance = start.y + start.height - anchorY
+    const maxFactor = Math.min(
+      MAX_FONT_SIZE / start.fontSize,
+      leftDistance > 0 ? anchorX / leftDistance : Infinity,
+      rightDistance > 0 ? (BOARD_WIDTH - anchorX) / rightDistance : Infinity,
+      topDistance > 0 ? anchorY / topDistance : Infinity,
+      bottomDistance > 0 ? (BOARD_HEIGHT - anchorY) / bottomDistance : Infinity,
+    )
+    if (maxFactor < minFactor) return
     const boundedFactor = Math.max(minFactor, Math.min(maxFactor, factor))
     const width = start.width * boundedFactor
     const height = start.height * boundedFactor
     onChange(item.id, {
-      x: fromLeft ? anchorX - width : anchorX,
-      y: fromTop ? anchorY - height : anchorY,
+      x: anchorX + (start.x - anchorX) * boundedFactor,
+      y: anchorY + (start.y - anchorY) * boundedFactor,
       width,
       height,
       baseHeight: (start.baseHeight ?? start.height) * boundedFactor,
@@ -148,8 +211,8 @@ export default function TextBox({ item, selected, groupSelected, interactive, fo
       <div
         ref={(node) => { editorRef.current = node; onEditorRef(item.id, node) }}
         className="text-box__editor"
-        contentEditable={interactive}
-        tabIndex={interactive ? 0 : -1}
+        contentEditable={interactive && editing}
+        tabIndex={interactive && editing ? 0 : -1}
         spellCheck={false}
         suppressContentEditableWarning
         role="textbox"
@@ -160,7 +223,6 @@ export default function TextBox({ item, selected, groupSelected, interactive, fo
           fontSize: item.fontSize, fontFamily: item.fontFamily, color: item.color, backgroundColor: item.highlight,
           textAlign: item.align, fontWeight: item.bold ? 700 : undefined, fontStyle: item.italic ? 'italic' : undefined,
           textDecoration: [item.underline && 'underline', item.strikeThrough && 'line-through'].filter(Boolean).join(' ') || undefined }}
-        dangerouslySetInnerHTML={{ __html: item.html }}
         onInput={() => measureHeightRef.current()}
         onFocus={() => onSelect(item.id)}
         onBlur={(event) => onCommit(item.id, event.currentTarget.innerHTML, !event.currentTarget.textContent?.trim())}
@@ -190,13 +252,37 @@ export default function TextBox({ item, selected, groupSelected, interactive, fo
           measureHeightRef.current()
         }}
       />
+      {interactive && !editing && <button className="text-box__body-drag" type="button"
+        aria-label={groupSelected ? 'Переместить выделенные тексты; нажать на текст для редактирования' : 'Выделить или переместить блок; нажать на текст для редактирования'}
+        title="Перетащить для перемещения · нажать на текст для редактирования"
+        onPointerDown={(event) => startGesture(event, 'move')}
+        onPointerMove={continueGesture}
+        onPointerUp={(event) => {
+          const current = gesture.current
+          gesture.current = null
+          if (!current || current.pointerId !== event.pointerId) return
+          if (current.moved || Math.hypot(event.clientX - current.clientX, event.clientY - current.clientY) >= 4) {
+            onChange(item.id, {
+              x: current.start.x + (event.clientX - current.clientX) / scale,
+              y: current.start.y + (event.clientY - current.clientY) / scale,
+            })
+            return
+          }
+          if (editorRef.current && isOverWrittenText(editorRef.current, event.clientX, event.clientY)) {
+            focusPoint.current = { x: event.clientX, y: event.clientY }
+            onEdit(item.id)
+          }
+        }}
+        onPointerCancel={() => { gesture.current = null }} />}
       {selected && (
         <>
-          <button className="text-box__drag-area" type="button" aria-label={groupSelected ? 'Переместить выделенные тексты' : 'Переместить текст'} title="Переместить текст"
-            onPointerDown={(event) => startGesture(event, 'move')}
+          {!groupSelected && EDGES.map(({ edge, label }) => <button key={edge} className={`text-box__drag-area text-box__drag-area--${edge}`}
+            type="button" aria-label={`Масштабировать текст: ${label} граница`}
+            title="Масштабировать текст"
+            onPointerDown={(event) => startGesture(event, 'resize', undefined, edge)}
             onPointerMove={continueGesture}
             onPointerUp={() => { gesture.current = null }}
-            onPointerCancel={() => { gesture.current = null }} />
+            onPointerCancel={() => { gesture.current = null }} />)}
           {!groupSelected && CORNERS.map(({ corner, label }) => <button key={corner} className={`text-box__handle text-box__handle--${corner}`}
             type="button" aria-label={`Изменить размер текста: ${label} угол`} title="Изменить размер текста"
             onPointerDown={(event) => startGesture(event, 'resize', corner)}

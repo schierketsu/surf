@@ -71,6 +71,7 @@ export default function BoardCanvas() {
   const [texts, setTexts] = useState<TextItem[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [multiSelectedIds, setMultiSelectedIds] = useState<string[]>([])
+  const [editingId, setEditingId] = useState<string | null>(null)
   const [focusId, setFocusId] = useState<string | null>(null)
   const [navigationMode, setNavigationMode] = useState<NavigationMode>('cursor')
   const [resetToCursorToken, setResetToCursorToken] = useState(0)
@@ -120,16 +121,40 @@ export default function BoardCanvas() {
     })
   }
 
+  const clearTextSelection = () => {
+    selectionRef.current = null
+    window.getSelection()?.removeAllRanges()
+  }
+
   const selectText = (id: string) => {
+    if (selectedId !== id) {
+      const previousEditor = selectedId ? editorRefs.current.get(selectedId) : null
+      if (previousEditor && document.activeElement === previousEditor) previousEditor.blur()
+      selectionRef.current = null
+      setEditingId(null)
+      setFocusId(null)
+      const selection = window.getSelection()
+      if (previousEditor && selection?.anchorNode && previousEditor.contains(selection.anchorNode)) {
+        selection.removeAllRanges()
+      }
+    }
     setSelectedId(id)
     setMultiSelectedIds([])
   }
 
+  const editText = (id: string) => {
+    selectText(id)
+    setEditingId(id)
+    setFocusId(id)
+  }
+
   const commitText = (id: string, html: string, isEmpty: boolean) => {
     if (isEmpty) {
+      clearTextSelection()
       setTexts((current) => current.filter((item) => item.id !== id))
       setSelectedId((current) => current === id ? null : current)
       setMultiSelectedIds((current) => current.filter((selected) => selected !== id))
+      setEditingId((current) => current === id ? null : current)
       setFocusId((current) => current === id ? null : current)
       editorRefs.current.delete(id)
     } else {
@@ -364,6 +389,7 @@ export default function BoardCanvas() {
       if (event.pointerType === 'mouse' && event.button !== 0) return
       if (navigationModeRef.current === 'cursor' && textModeRef.current) {
         event.preventDefault()
+        clearTextSelection()
         const view = viewRef.current
         if (!view) return
         const bounds = board.getBoundingClientRect()
@@ -378,6 +404,7 @@ export default function BoardCanvas() {
         }])
         setSelectedId(id)
         setMultiSelectedIds([])
+        setEditingId(id)
         setFocusId(id)
         selectionRef.current = null
         textModeRef.current = false
@@ -394,8 +421,11 @@ export default function BoardCanvas() {
         canvas.classList.add('is-dragging')
       } else {
         document.activeElement instanceof HTMLElement && document.activeElement.blur()
+        clearTextSelection()
         setSelectedId(null)
         setMultiSelectedIds([])
+        setEditingId(null)
+        setFocusId(null)
         drag = { kind: 'select', pointerId: event.pointerId, x, y, startX: x, startY: y }
       }
       canvas.setPointerCapture(event.pointerId)
@@ -500,12 +530,14 @@ export default function BoardCanvas() {
       </canvas>
       {viewState && <div className="board-objects" style={{ width: BOARD_WIDTH, height: BOARD_HEIGHT, transform: `translate(${viewState.x}px, ${viewState.y}px) scale(${viewState.scale})` }}>
         {texts.map((item) => <TextBox key={item.id} item={item} selected={selectedId === item.id || multiSelectedIds.includes(item.id)}
-          groupSelected={multiSelectedIds.length > 1 && multiSelectedIds.includes(item.id)} interactive={navigationMode === 'cursor'} focusOnMount={focusId === item.id}
-          scale={viewState.scale} onSelect={selectText} onChange={changeTextFromBox} onCommit={commitText}
-          onDismiss={() => { setSelectedId(null); setMultiSelectedIds([]) }} onSaveSelection={saveSelection}
+          groupSelected={multiSelectedIds.length > 1 && multiSelectedIds.includes(item.id)} interactive={navigationMode === 'cursor'}
+          editing={editingId === item.id} focusOnMount={focusId === item.id && editingId === item.id}
+          scale={viewState.scale} onSelect={selectText} onEdit={editText} onChange={changeTextFromBox} onCommit={commitText}
+          onDismiss={() => { clearTextSelection(); setSelectedId(null); setMultiSelectedIds([]); setEditingId(null); setFocusId(null) }} onSaveSelection={saveSelection}
           onEditorRef={(id, node) => { if (node) editorRefs.current.set(id, node); else editorRefs.current.delete(id) }} />)}
       </div>}
-      {viewState && navigationMode === 'cursor' && selectedTexts.length > 1 && <GroupSelection items={selectedTexts} view={viewState} onScale={scaleSelectedTexts} />}
+      {viewState && navigationMode === 'cursor' && selectedTexts.length > 1 && <GroupSelection items={selectedTexts} view={viewState}
+        onScale={scaleSelectedTexts} />}
       {selectionRect && <div className="board-selection" style={selectionRect} aria-hidden="true" />}
       {selectedText && viewState && navigationMode === 'cursor' && <TextToolbar key={multiSelectedIds.length ? multiSelectedIds.join(':') : selectedText.id}
         item={selectedText} centerX={toolbarCenterX} top={toolbarTop} activeFormatsOverride={groupFormats}
@@ -515,14 +547,23 @@ export default function BoardCanvas() {
         setNavigationMode(mode)
         if (mode === 'hand') {
           if (document.activeElement instanceof HTMLElement) document.activeElement.blur()
+          clearTextSelection()
           setSelectedId(null)
           setMultiSelectedIds([])
+          setEditingId(null)
+          setFocusId(null)
           setSelectionRect(null)
         }
       }} onTextToolChange={(active) => {
+        const editor = editingId ? editorRefs.current.get(editingId) : null
+        if (editor && document.activeElement === editor) editor.blur()
         textModeRef.current = active
         canvasRef.current?.classList.toggle('is-text-mode', active)
-        if (!active) setFocusId(null)
+        clearTextSelection()
+        setSelectedId(null)
+        setMultiSelectedIds([])
+        setEditingId(null)
+        setFocusId(null)
       }} />
       <ZoomControls
         onZoomOut={() => zoomRef.current(0.8)}
