@@ -45,8 +45,10 @@ function applyTextChanges(item: TextItem, changes: Partial<TextItem>): TextItem 
     const factor = changes.fontSize / item.fontSize
     next.width = item.width * factor
     next.height = item.height * factor
+    next.baseHeight = (item.baseHeight ?? item.height) * factor
   }
   next.fontSize = Math.max(MIN_FONT_SIZE, Math.min(MAX_FONT_SIZE, next.fontSize))
+  next.baseHeight = Math.max(MIN_TEXT_HEIGHT, next.baseHeight ?? item.height)
   next.width = Math.max(MIN_TEXT_WIDTH, Math.min(next.width, BOARD_WIDTH - next.x))
   next.height = Math.max(MIN_TEXT_HEIGHT, Math.min(next.height, BOARD_HEIGHT - next.y))
   next.x = Math.max(0, Math.min(BOARD_WIDTH - next.width, next.x))
@@ -96,6 +98,7 @@ export default function BoardCanvas() {
         y: anchorY + (start.y - anchorY) * factor,
         width: start.width * factor,
         height: start.height * factor,
+        baseHeight: (start.baseHeight ?? start.height) * factor,
         fontSize: Math.round(start.fontSize * factor * 10) / 10,
       }
     }))
@@ -368,7 +371,8 @@ export default function BoardCanvas() {
         const y = Math.max(0, Math.min(BOARD_HEIGHT - INITIAL_TEXT_HEIGHT, (event.clientY - bounds.top - view.y) / view.scale))
         const id = crypto.randomUUID()
         setTexts((current) => [...current, {
-          id, x, y, width: INITIAL_TEXT_WIDTH, height: INITIAL_TEXT_HEIGHT, html: '', fontSize: MIN_FONT_SIZE,
+          id, x, y, width: INITIAL_TEXT_WIDTH, height: INITIAL_TEXT_HEIGHT, baseHeight: INITIAL_TEXT_HEIGHT,
+          html: '', fontSize: MIN_FONT_SIZE,
           fontFamily: "'Doska', Arial, sans-serif", color: '#272727', highlight: 'transparent',
           align: 'left', opacity: 1, comment: '',
         }])

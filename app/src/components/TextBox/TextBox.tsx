@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useLayoutEffect, useRef } from 'react'
 import { BOARD_HEIGHT, BOARD_WIDTH } from '../../gridHierarchy'
 import './TextBox.css'
 
@@ -23,6 +23,7 @@ export type TextItem = {
   y: number
   width: number
   height: number
+  baseHeight: number
   html: string
   fontSize: number
   fontFamily: string
@@ -55,6 +56,29 @@ type TextBoxProps = {
 export default function TextBox({ item, selected, groupSelected, interactive, focusOnMount, scale, onSelect, onChange, onCommit, onDismiss, onEditorRef, onSaveSelection }: TextBoxProps) {
   const editorRef = useRef<HTMLDivElement | null>(null)
   const gesture = useRef<Gesture | null>(null)
+  const measureHeightRef = useRef<() => void>(() => {})
+
+  measureHeightRef.current = () => {
+    const editor = editorRef.current
+    if (!editor) return
+    const height = Math.min(BOARD_HEIGHT, Math.max(item.baseHeight ?? item.height, Math.ceil(editor.scrollHeight) + 2))
+    const y = Math.min(item.y, BOARD_HEIGHT - height)
+    if (Math.abs(height - item.height) > 0.5 || Math.abs(y - item.y) > 0.5) {
+      onChange(item.id, { height, y })
+    }
+  }
+
+  useLayoutEffect(() => {
+    measureHeightRef.current()
+  })
+
+  useEffect(() => {
+    const editor = editorRef.current
+    if (!editor) return
+    const observer = new ResizeObserver(() => measureHeightRef.current())
+    observer.observe(editor)
+    return () => observer.disconnect()
+  }, [])
 
   useEffect(() => {
     if (!focusOnMount || !editorRef.current) return
@@ -110,6 +134,7 @@ export default function TextBox({ item, selected, groupSelected, interactive, fo
       y: fromTop ? anchorY - height : anchorY,
       width,
       height,
+      baseHeight: (start.baseHeight ?? start.height) * boundedFactor,
       fontSize: Math.round(start.fontSize * boundedFactor * 10) / 10,
     })
   }
@@ -131,10 +156,12 @@ export default function TextBox({ item, selected, groupSelected, interactive, fo
         aria-label="Текст на доске"
         aria-multiline="true"
         data-placeholder="Введите текст"
-        style={{ fontSize: item.fontSize, fontFamily: item.fontFamily, color: item.color, backgroundColor: item.highlight,
+        style={{ minHeight: Math.max(30, (item.baseHeight ?? item.height) - 2),
+          fontSize: item.fontSize, fontFamily: item.fontFamily, color: item.color, backgroundColor: item.highlight,
           textAlign: item.align, fontWeight: item.bold ? 700 : undefined, fontStyle: item.italic ? 'italic' : undefined,
           textDecoration: [item.underline && 'underline', item.strikeThrough && 'line-through'].filter(Boolean).join(' ') || undefined }}
         dangerouslySetInnerHTML={{ __html: item.html }}
+        onInput={() => measureHeightRef.current()}
         onFocus={() => onSelect(item.id)}
         onBlur={(event) => onCommit(item.id, event.currentTarget.innerHTML, !event.currentTarget.textContent?.trim())}
         onKeyDown={(event) => {
@@ -160,6 +187,7 @@ export default function TextBox({ item, selected, groupSelected, interactive, fo
           range.collapse(true)
           selection.removeAllRanges()
           selection.addRange(range)
+          measureHeightRef.current()
         }}
       />
       {selected && (
