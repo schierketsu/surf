@@ -15,7 +15,7 @@
   height: auto;
   min-height: 30px;
   padding: 4px;
-  overflow: visible;
+  overflow: clip;
   outline: 0;
   line-height: 1.2;
   white-space: pre-wrap;

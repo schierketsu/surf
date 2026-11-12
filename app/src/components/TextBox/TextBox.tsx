@@ -82,11 +82,27 @@ export default function TextBox({ item, selected, groupSelected, interactive, ed
   const gesture = useRef<Gesture | null>(null)
   const focusPoint = useRef<{ x: number; y: number } | null>(null)
   const measureHeightRef = useRef<() => void>(() => {})
+  const lastValidHtml = useRef(item.html)
 
   measureHeightRef.current = () => {
     const editor = editorRef.current
     if (!editor) return
-    const height = Math.min(BOARD_HEIGHT, Math.max(item.baseHeight ?? item.height, Math.ceil(editor.scrollHeight) + 2))
+    const contentHeight = Math.ceil(editor.scrollHeight) + 2
+    if (contentHeight > BOARD_HEIGHT) {
+      if (editor.innerHTML !== lastValidHtml.current) {
+        editor.innerHTML = lastValidHtml.current
+        const selection = window.getSelection()
+        selection?.selectAllChildren(editor)
+        selection?.collapseToEnd()
+        if (item.html !== editor.innerHTML) onCommit(item.id, editor.innerHTML, false)
+      } else if (item.fontSize > MIN_FONT_SIZE) {
+        const fontSize = Math.max(MIN_FONT_SIZE, Math.floor(item.fontSize * (BOARD_HEIGHT - 2) / contentHeight))
+        if (fontSize < item.fontSize) onChange(item.id, { fontSize })
+      }
+      return
+    }
+    lastValidHtml.current = editor.innerHTML
+    const height = Math.max(item.baseHeight ?? item.height, contentHeight)
     const y = Math.min(item.y, BOARD_HEIGHT - height)
     if (Math.abs(height - item.height) > 0.5 || Math.abs(y - item.y) > 0.5) {
       onChange(item.id, { height, y })
@@ -219,7 +235,7 @@ export default function TextBox({ item, selected, groupSelected, interactive, ed
         aria-label="Текст на доске"
         aria-multiline="true"
         data-placeholder="Введите текст"
-        style={{ minHeight: Math.max(30, (item.baseHeight ?? item.height) - 2),
+        style={{ minHeight: Math.max(30, (item.baseHeight ?? item.height) - 2), maxHeight: BOARD_HEIGHT - 2,
           fontSize: item.fontSize, fontFamily: item.fontFamily, color: item.color, backgroundColor: item.highlight,
           textAlign: item.align, fontWeight: item.bold ? 700 : undefined, fontStyle: item.italic ? 'italic' : undefined,
           textDecoration: [item.underline && 'underline', item.strikeThrough && 'line-through'].filter(Boolean).join(' ') || undefined }}
@@ -250,6 +266,7 @@ export default function TextBox({ item, selected, groupSelected, interactive, ed
           selection.removeAllRanges()
           selection.addRange(range)
           measureHeightRef.current()
+          onSaveSelection()
         }}
       />
       {interactive && !editing && <button className="text-box__body-drag" type="button"
