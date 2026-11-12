@@ -5,7 +5,7 @@ import stickerIcon from './icons/sticker.svg'
 import './ToolPanel.css'
 
 type DrawingTool = 'pencil' | 'highlighter'
-type NavigationMode = 'cursor' | 'hand'
+export type NavigationMode = 'cursor' | 'hand'
 type ActiveTool = DrawingTool | 'text' | 'sticker' | null
 type OpenMenu = 'drawing' | 'stickers' | null
 type IconName = DrawingTool | 'text' | 'sticker'
@@ -32,12 +32,25 @@ function Icon({ name }: { name: IconName }) {
   return <span className={`tool-panel__icon tool-panel__icon--${name}`} aria-hidden="true" />
 }
 
-export default function ToolPanel() {
+type ToolPanelProps = {
+  onTextToolChange: (active: boolean) => void
+  onNavigationModeChange: (mode: NavigationMode) => void
+  resetToCursorToken: number
+}
+
+export default function ToolPanel({ onTextToolChange, onNavigationModeChange, resetToCursorToken }: ToolPanelProps) {
   const rootRef = useRef<HTMLDivElement>(null)
   const [navigationMode, setNavigationMode] = useState<NavigationMode>('cursor')
   const [drawingTool, setDrawingTool] = useState<DrawingTool>('pencil')
   const [activeTool, setActiveTool] = useState<ActiveTool>(null)
   const [openMenu, setOpenMenu] = useState<OpenMenu>(null)
+
+  useEffect(() => {
+    if (!resetToCursorToken) return
+    setNavigationMode('cursor')
+    setActiveTool(null)
+    setOpenMenu(null)
+  }, [resetToCursorToken])
 
   useEffect(() => {
     const closeOnOutsideClick = (event: PointerEvent) => {
@@ -65,8 +78,12 @@ export default function ToolPanel() {
         title={navigationMode === 'cursor' ? 'Включить ладонь' : 'Включить курсор'}
         data-mode={navigationMode}
         onClick={() => {
-          setNavigationMode(navigationMode === 'cursor' ? 'hand' : 'cursor')
+          const next = navigationMode === 'cursor' ? 'hand' : 'cursor'
+          setNavigationMode(next)
+          onNavigationModeChange(next)
           setOpenMenu(null)
+          setActiveTool(null)
+          onTextToolChange(false)
         }}
       >
         <span className="tool-panel__navigation-slot">
@@ -88,6 +105,7 @@ export default function ToolPanel() {
           onClick={() => {
             setActiveTool(drawingTool)
             setOpenMenu(openMenu === 'drawing' ? null : 'drawing')
+            onTextToolChange(false)
           }}
         >
           <Icon name={drawingTool} />
@@ -99,8 +117,11 @@ export default function ToolPanel() {
           title="Текст"
           data-active={activeTool === 'text'}
           onClick={() => {
+            setNavigationMode('cursor')
+            onNavigationModeChange('cursor')
             setActiveTool('text')
             setOpenMenu(null)
+            onTextToolChange(true)
           }}
         >
           <Icon name="text" />
@@ -116,6 +137,7 @@ export default function ToolPanel() {
           onClick={() => {
             setActiveTool('sticker')
             setOpenMenu(openMenu === 'stickers' ? null : 'stickers')
+            onTextToolChange(false)
           }}
         >
           <Icon name="sticker" />
@@ -136,6 +158,7 @@ export default function ToolPanel() {
                 setDrawingTool(tool)
                 setActiveTool(tool)
                 setOpenMenu(null)
+                onTextToolChange(false)
               }}
             >
               <Icon name={tool} />

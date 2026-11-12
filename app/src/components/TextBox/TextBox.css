@@ -1,0 +1,79 @@
+.text-box {
+  position: absolute;
+  min-width: 150px;
+  min-height: 32px;
+  pointer-events: auto;
+  border: 1px solid transparent;
+}
+
+.text-box--selected {
+  border-color: #0057ff;
+}
+
+.text-box__editor {
+  width: 100%;
+  height: 100%;
+  min-height: 30px;
+  padding: 4px;
+  overflow: auto;
+  outline: 0;
+  line-height: 1.2;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.text-box__editor:empty::before {
+  color: #aaa;
+  content: attr(data-placeholder);
+  pointer-events: none;
+}
+
+.text-box__handle {
+  position: absolute;
+  z-index: 2;
+  display: block;
+  box-sizing: border-box;
+  width: 12px;
+  height: 12px;
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+  appearance: none;
+  border: 1px solid #8893a4;
+  border-radius: 50%;
+  background: #fff;
+}
+
+.text-box__handle {
+  touch-action: none;
+}
+
+.text-box__handle--top-left { top: -6px; left: -6px; cursor: nwse-resize; }
+.text-box__handle--top-right { top: -6px; right: -6px; }
+.text-box__handle--bottom-left { bottom: -6px; left: -6px; }
+.text-box__handle--top-right,
+.text-box__handle--bottom-left { cursor: nesw-resize; }
+.text-box__handle--bottom-right { right: -6px; bottom: -6px; cursor: nwse-resize; }
+
+.text-box__drag-area {
+  position: absolute;
+  z-index: 1;
+  top: -6px;
+  right: 14px;
+  left: 14px;
+  height: 12px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: move;
+  touch-action: none;
+}
+
+.text-box__comment {
+  position: absolute;
+  top: 0;
+  right: -20px;
+  color: #0057ff;
+  font-size: 18px;
+  line-height: 1;
+}

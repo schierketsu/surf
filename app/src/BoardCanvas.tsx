@@ -1,12 +1,19 @@
 import { useEffect, useRef, useState } from 'react'
-import ToolPanel from './components/ToolPanel/ToolPanel'
+import ToolPanel, { type NavigationMode } from './components/ToolPanel/ToolPanel'
 import ZoomControls from './components/ZoomControls/ZoomControls'
+import TextBox, { MAX_FONT_SIZE, MIN_FONT_SIZE, MIN_TEXT_HEIGHT, MIN_TEXT_WIDTH, type TextItem } from './components/TextBox/TextBox'
+import GroupSelection from './components/GroupSelection/GroupSelection'
+import TextToolbar from './components/TextToolbar/TextToolbar'
 import { BOARD_HEIGHT, BOARD_WIDTH, MINI_CELLS_PER_SIDE, gridLevelForScale, visitVisibleCells, type WorldRect } from './gridHierarchy'
 
 type View = { scale: number; x: number; y: number }
+type SelectionRect = { left: number; top: number; width: number; height: number }
+type FormatCommand = 'bold' | 'italic' | 'underline' | 'strikeThrough'
 
 const MAX_SCALE = 4
 const WHEEL_ZOOM_SENSITIVITY = 0.002
+const INITIAL_TEXT_WIDTH = 180
+const INITIAL_TEXT_HEIGHT = 40
 
 function coverScale(width: number, height: number) {
   return Math.max(width / BOARD_WIDTH, height / BOARD_HEIGHT)
@@ -32,12 +39,137 @@ function keepBoardInView(view: View, width: number, height: number): View {
   }
 }
 
+function applyTextChanges(item: TextItem, changes: Partial<TextItem>): TextItem {
+  const next = { ...item, ...changes }
+  if (changes.fontSize !== undefined && changes.width === undefined && changes.height === undefined) {
+    const factor = changes.fontSize / item.fontSize
+    next.width = item.width * factor
+    next.height = item.height * factor
+  }
+  next.fontSize = Math.max(MIN_FONT_SIZE, Math.min(MAX_FONT_SIZE, next.fontSize))
+  next.width = Math.max(MIN_TEXT_WIDTH, Math.min(next.width, BOARD_WIDTH - next.x))
+  next.height = Math.max(MIN_TEXT_HEIGHT, Math.min(next.height, BOARD_HEIGHT - next.y))
+  next.x = Math.max(0, Math.min(BOARD_WIDTH - next.width, next.x))
+  next.y = Math.max(0, Math.min(BOARD_HEIGHT - next.height, next.y))
+  return next
+}
+
 export default function BoardCanvas() {
   const boardRef = useRef<HTMLElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const viewRef = useRef<View | null>(null)
   const zoomRef = useRef<(factor: number) => void>(() => {})
+  const textModeRef = useRef(false)
+  const navigationModeRef = useRef<NavigationMode>('cursor')
+  const textsRef = useRef<TextItem[]>([])
+  const editorRefs = useRef(new Map<string, HTMLDivElement>())
+  const selectionRef = useRef<Range | null>(null)
   const [zoomLimits, setZoomLimits] = useState({ atMin: false, atMax: false })
+  const [viewState, setViewState] = useState<View | null>(null)
+  const [texts, setTexts] = useState<TextItem[]>([])
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [multiSelectedIds, setMultiSelectedIds] = useState<string[]>([])
+  const [focusId, setFocusId] = useState<string | null>(null)
+  const [navigationMode, setNavigationMode] = useState<NavigationMode>('cursor')
+  const [resetToCursorToken, setResetToCursorToken] = useState(0)
+  const [selectionRect, setSelectionRect] = useState<SelectionRect | null>(null)
+
+  textsRef.current = texts
+
+  const changeText = (id: string, changes: Partial<TextItem>) => {
+    setTexts((current) => current.map((item) => item.id === id ? applyTextChanges(item, changes) : item))
+  }
+
+  const changeSelectedTexts = (changes: Partial<TextItem>) => {
+    const ids = new Set(multiSelectedIds)
+    setTexts((current) => current.map((item) => ids.has(item.id) ? applyTextChanges(item, changes) : item))
+  }
+
+  const scaleSelectedTexts = (startItems: TextItem[], anchorX: number, anchorY: number, factor: number) => {
+    const originals = new Map(startItems.map((item) => [item.id, item]))
+    setTexts((current) => current.map((item) => {
+      const start = originals.get(item.id)
+      if (!start) return item
+      return {
+        ...item,
+        x: anchorX + (start.x - anchorX) * factor,
+        y: anchorY + (start.y - anchorY) * factor,
+        width: start.width * factor,
+        height: start.height * factor,
+        fontSize: Math.round(start.fontSize * factor * 10) / 10,
+      }
+    }))
+  }
+
+  const changeTextFromBox = (id: string, changes: Partial<TextItem>) => {
+    if (!multiSelectedIds.includes(id) || changes.x === undefined || changes.y === undefined || Object.keys(changes).length !== 2) {
+      changeText(id, changes)
+      return
+    }
+    const ids = new Set(multiSelectedIds)
+    setTexts((current) => {
+      const source = current.find((item) => item.id === id)
+      const group = current.filter((item) => ids.has(item.id))
+      if (!source || !group.length) return current
+      const dx = Math.max(Math.max(...group.map((item) => -item.x)), Math.min(Math.min(...group.map((item) => BOARD_WIDTH - item.x - item.width)), changes.x! - source.x))
+      const dy = Math.max(Math.max(...group.map((item) => -item.y)), Math.min(Math.min(...group.map((item) => BOARD_HEIGHT - item.y - item.height)), changes.y! - source.y))
+      return current.map((item) => ids.has(item.id) ? { ...item, x: item.x + dx, y: item.y + dy } : item)
+    })
+  }
+
+  const selectText = (id: string) => {
+    setSelectedId(id)
+    setMultiSelectedIds([])
+  }
+
+  const commitText = (id: string, html: string, isEmpty: boolean) => {
+    if (isEmpty) {
+      setTexts((current) => current.filter((item) => item.id !== id))
+      setSelectedId((current) => current === id ? null : current)
+      setMultiSelectedIds((current) => current.filter((selected) => selected !== id))
+      setFocusId((current) => current === id ? null : current)
+      editorRefs.current.delete(id)
+    } else {
+      changeText(id, { html })
+    }
+  }
+
+  const saveSelection = () => {
+    const selection = window.getSelection()
+    if (selection?.rangeCount) selectionRef.current = selection.getRangeAt(0).cloneRange()
+  }
+
+  const formatText = (command: string, value?: string) => {
+    if (multiSelectedIds.length) {
+      const key = command as FormatCommand
+      if (!['bold', 'italic', 'underline', 'strikeThrough'].includes(key)) return
+      const ids = new Set(multiSelectedIds)
+      setTexts((current) => {
+        const group = current.filter((item) => ids.has(item.id))
+        const nextValue = !group.every((item) => Boolean(item[key]))
+        return current.map((item) => ids.has(item.id) ? { ...item, [key]: nextValue } : item)
+      })
+      return
+    }
+    if (!selectedId) return
+    const editor = editorRefs.current.get(selectedId)
+    if (!editor) return
+    const selection = window.getSelection()
+    const currentRange = selection?.rangeCount ? selection.getRangeAt(0).cloneRange() : null
+    editor.focus()
+    const range = currentRange && !currentRange.collapsed && editor.contains(currentRange.commonAncestorContainer)
+      ? currentRange
+      : selectionRef.current
+    if (selection && range && editor.contains(range.commonAncestorContainer)) {
+      selection.removeAllRanges()
+      selection.addRange(range)
+    } else if (selection) {
+      selection.selectAllChildren(editor)
+    }
+    document.execCommand(command, false, value)
+    changeText(selectedId, { html: editor.innerHTML })
+    saveSelection()
+  }
 
   useEffect(() => {
     const board = boardRef.current
@@ -45,7 +177,7 @@ export default function BoardCanvas() {
     if (!board || !canvas) return
 
     let previousSize = { width: 0, height: 0 }
-    let drag: { pointerId: number; x: number; y: number } | null = null
+    let drag: { kind: 'pan' | 'select'; pointerId: number; x: number; y: number; startX: number; startY: number } | null = null
     let frame: number | null = null
 
     const draw = () => {
@@ -157,6 +289,7 @@ export default function BoardCanvas() {
     }
     const applyView = (view: View) => {
       viewRef.current = view
+      setViewState(view)
       scheduleDraw()
     }
 
@@ -226,13 +359,59 @@ export default function BoardCanvas() {
 
     const onPointerDown = (event: PointerEvent) => {
       if (event.pointerType === 'mouse' && event.button !== 0) return
-      drag = { pointerId: event.pointerId, x: event.clientX, y: event.clientY }
+      if (navigationModeRef.current === 'cursor' && textModeRef.current) {
+        event.preventDefault()
+        const view = viewRef.current
+        if (!view) return
+        const bounds = board.getBoundingClientRect()
+        const x = Math.max(0, Math.min(BOARD_WIDTH - INITIAL_TEXT_WIDTH, (event.clientX - bounds.left - view.x) / view.scale))
+        const y = Math.max(0, Math.min(BOARD_HEIGHT - INITIAL_TEXT_HEIGHT, (event.clientY - bounds.top - view.y) / view.scale))
+        const id = crypto.randomUUID()
+        setTexts((current) => [...current, {
+          id, x, y, width: INITIAL_TEXT_WIDTH, height: INITIAL_TEXT_HEIGHT, html: '', fontSize: MIN_FONT_SIZE,
+          fontFamily: "'Doska', Arial, sans-serif", color: '#272727', highlight: 'transparent',
+          align: 'left', opacity: 1, comment: '',
+        }])
+        setSelectedId(id)
+        setMultiSelectedIds([])
+        setFocusId(id)
+        selectionRef.current = null
+        textModeRef.current = false
+        canvas.classList.remove('is-text-mode')
+        setResetToCursorToken((current) => current + 1)
+        return
+      }
+      event.preventDefault()
+      const bounds = board.getBoundingClientRect()
+      const x = event.clientX - bounds.left
+      const y = event.clientY - bounds.top
+      if (navigationModeRef.current === 'hand') {
+        drag = { kind: 'pan', pointerId: event.pointerId, x: event.clientX, y: event.clientY, startX: x, startY: y }
+        canvas.classList.add('is-dragging')
+      } else {
+        document.activeElement instanceof HTMLElement && document.activeElement.blur()
+        setSelectedId(null)
+        setMultiSelectedIds([])
+        drag = { kind: 'select', pointerId: event.pointerId, x, y, startX: x, startY: y }
+      }
       canvas.setPointerCapture(event.pointerId)
-      canvas.classList.add('is-dragging')
     }
 
     const onPointerMove = (event: PointerEvent) => {
-      if (!drag || drag.pointerId !== event.pointerId || !viewRef.current) return
+      if (!drag || drag.pointerId !== event.pointerId) return
+      if (drag.kind === 'select') {
+        const bounds = board.getBoundingClientRect()
+        const x = event.clientX - bounds.left
+        const y = event.clientY - bounds.top
+        if (Math.hypot(x - drag.startX, y - drag.startY) >= 4) {
+          setSelectionRect({
+            left: Math.min(drag.startX, x), top: Math.min(drag.startY, y),
+            width: Math.abs(x - drag.startX), height: Math.abs(y - drag.startY),
+          })
+        }
+        return
+      }
+      if (!viewRef.current) return
       const { width, height } = board.getBoundingClientRect()
       applyView(keepBoardInView({
         ...viewRef.current,
@@ -245,8 +424,24 @@ export default function BoardCanvas() {
 
     const onPointerUp = (event: PointerEvent) => {
       if (!drag || drag.pointerId !== event.pointerId) return
+      if (drag.kind === 'select' && event.type !== 'pointercancel') {
+        const bounds = board.getBoundingClientRect()
+        const x = event.clientX - bounds.left
+        const y = event.clientY - bounds.top
+        const view = viewRef.current
+        if (view && Math.hypot(x - drag.startX, y - drag.startY) >= 4) {
+          const left = (Math.min(drag.startX, x) - view.x) / view.scale
+          const top = (Math.min(drag.startY, y) - view.y) / view.scale
+          const right = (Math.max(drag.startX, x) - view.x) / view.scale
+          const bottom = (Math.max(drag.startY, y) - view.y) / view.scale
+          const ids = textsRef.current.filter((item) => item.x < right && item.x + item.width > left && item.y < bottom && item.y + item.height > top).map((item) => item.id)
+          setSelectedId(ids.length === 1 ? ids[0] : null)
+          setMultiSelectedIds(ids.length > 1 ? ids : [])
+        }
+      }
       drag = null
       canvas.classList.remove('is-dragging')
+      setSelectionRect(null)
       if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId)
     }
 
@@ -272,12 +467,59 @@ export default function BoardCanvas() {
     }
   }, [])
 
+  const selectedTexts = multiSelectedIds.length
+    ? texts.filter((item) => multiSelectedIds.includes(item.id))
+    : texts.filter((item) => item.id === selectedId)
+  const selectedText = selectedTexts[0]
+  const selectedBounds = selectedTexts.length ? {
+    left: Math.min(...selectedTexts.map((item) => item.x)),
+    top: Math.min(...selectedTexts.map((item) => item.y)),
+    right: Math.max(...selectedTexts.map((item) => item.x + item.width)),
+  } : null
+  const toolbarCenterX = selectedBounds && viewState
+    ? viewState.x + ((selectedBounds.left + selectedBounds.right) / 2) * viewState.scale
+    : 0
+  const toolbarTop = selectedBounds && viewState
+    ? Math.max(12, viewState.y + selectedBounds.top * viewState.scale - 59)
+    : 12
+  const groupFormats = selectedTexts.length > 1 ? {
+    bold: selectedTexts.every((item) => Boolean(item.bold)),
+    italic: selectedTexts.every((item) => Boolean(item.italic)),
+    underline: selectedTexts.every((item) => Boolean(item.underline)),
+    strikeThrough: selectedTexts.every((item) => Boolean(item.strikeThrough)),
+  } : undefined
+
   return (
-    <main ref={boardRef} className="board" aria-label="Поле доски 3840 на 2160 пикселей">
+    <main ref={boardRef} className={`board${navigationMode === 'hand' ? ' board--hand' : ''}`} aria-label="Поле доски 3840 на 2160 пикселей">
       <canvas ref={canvasRef} className="board-canvas">
         Поле доски требует поддержки Canvas.
       </canvas>
-      <ToolPanel />
+      {viewState && <div className="board-objects" style={{ width: BOARD_WIDTH, height: BOARD_HEIGHT, transform: `translate(${viewState.x}px, ${viewState.y}px) scale(${viewState.scale})` }}>
+        {texts.map((item) => <TextBox key={item.id} item={item} selected={selectedId === item.id || multiSelectedIds.includes(item.id)}
+          groupSelected={multiSelectedIds.length > 1 && multiSelectedIds.includes(item.id)} interactive={navigationMode === 'cursor'} focusOnMount={focusId === item.id}
+          scale={viewState.scale} onSelect={selectText} onChange={changeTextFromBox} onCommit={commitText}
+          onDismiss={() => { setSelectedId(null); setMultiSelectedIds([]) }} onSaveSelection={saveSelection}
+          onEditorRef={(id, node) => { if (node) editorRefs.current.set(id, node); else editorRefs.current.delete(id) }} />)}
+      </div>}
+      {viewState && navigationMode === 'cursor' && selectedTexts.length > 1 && <GroupSelection items={selectedTexts} view={viewState} onScale={scaleSelectedTexts} />}
+      {selectionRect && <div className="board-selection" style={selectionRect} aria-hidden="true" />}
+      {selectedText && viewState && navigationMode === 'cursor' && <TextToolbar key={multiSelectedIds.length ? multiSelectedIds.join(':') : selectedText.id}
+        item={selectedText} centerX={toolbarCenterX} top={toolbarTop} activeFormatsOverride={groupFormats}
+        onChange={(changes) => multiSelectedIds.length ? changeSelectedTexts(changes) : changeText(selectedText.id, changes)} onFormat={formatText} />}
+      <ToolPanel resetToCursorToken={resetToCursorToken} onNavigationModeChange={(mode) => {
+        navigationModeRef.current = mode
+        setNavigationMode(mode)
+        if (mode === 'hand') {
+          if (document.activeElement instanceof HTMLElement) document.activeElement.blur()
+          setSelectedId(null)
+          setMultiSelectedIds([])
+          setSelectionRect(null)
+        }
+      }} onTextToolChange={(active) => {
+        textModeRef.current = active
+        canvasRef.current?.classList.toggle('is-text-mode', active)
+        if (!active) setFocusId(null)
+      }} />
       <ZoomControls
         onZoomOut={() => zoomRef.current(0.8)}
         onZoomIn={() => zoomRef.current(1.25)}

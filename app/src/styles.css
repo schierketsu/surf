@@ -85,11 +85,41 @@ h6 {
   width: 100%;
   height: 100%;
   background: var(--canvas-background);
-  cursor: grab;
+  cursor: default;
   touch-action: none;
+}
+
+.board--hand .board-canvas {
+  cursor: grab;
 }
 
 .board-canvas.is-dragging {
   cursor: grabbing;
+}
+
+.board-canvas.is-text-mode {
+  cursor: text;
+}
+
+.board-objects {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform-origin: 0 0;
+  pointer-events: none;
+}
+
+.board--hand .text-box,
+.board--hand .text-box * {
+  pointer-events: none;
+}
+
+.board-selection {
+  position: absolute;
+  z-index: 2;
+  box-sizing: border-box;
+  border: 1px solid #0057ff;
+  background: rgb(0 87 255 / 12%);
+  pointer-events: none;
 }
 

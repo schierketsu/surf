@@ -1,0 +1,186 @@
+.text-toolbar {
+  position: absolute;
+  z-index: 5;
+  max-width: calc(100vw - 24px);
+  border: 1px solid #e7e9ed;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 3px 16px rgb(0 0 0 / 12%);
+  color: #272727;
+}
+
+.text-toolbar__row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-height: 44px;
+  padding: 4px 7px;
+}
+
+.text-toolbar button { font: inherit; }
+
+.text-toolbar__control {
+  position: relative;
+  flex: none;
+}
+
+.text-toolbar__control > button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 34px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.text-toolbar__control > button:hover,
+.text-toolbar__control > button[aria-expanded='true'],
+.text-toolbar__control > button[data-active='true'],
+.text-toolbar__popover button:hover,
+.text-toolbar__popover button[aria-pressed='true'] { background: #eef2f6; }
+
+.text-toolbar__font {
+  justify-content: space-between !important;
+  gap: 10px;
+  width: 150px;
+  padding: 0 9px;
+  white-space: nowrap;
+}
+
+.text-toolbar__divider {
+  flex: none;
+  align-self: stretch;
+  width: 1px;
+  margin: -4px 3px;
+  background: #e2e6eb;
+}
+
+.text-toolbar__control--size {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+}
+
+.text-toolbar__size-value {
+  min-width: 35px;
+  padding: 0 4px;
+  font-variant-numeric: tabular-nums;
+}
+
+.text-toolbar__size-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.text-toolbar__size-steps button {
+  display: grid;
+  width: 19px;
+  height: 16px;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: #3e4652;
+  cursor: pointer;
+}
+
+.text-toolbar__size-steps button:hover { background: #eef2f6; }
+.text-toolbar__size-steps button:disabled { opacity: .3; cursor: default; }
+
+.text-toolbar__arrow {
+  display: inline-block;
+  flex: none;
+  width: 5px;
+  height: 5px;
+  border-top: 1.5px solid currentColor;
+  border-left: 1.5px solid currentColor;
+}
+
+.text-toolbar__arrow--up { transform: translateY(2px) rotate(45deg); }
+.text-toolbar__arrow--down { transform: translateY(-2px) rotate(225deg); }
+
+.text-toolbar__icon-button { width: 34px; font-size: 19px !important; }
+
+.text-toolbar__asset-icon {
+  display: block;
+  width: 26px;
+  height: 26px;
+  object-fit: contain;
+}
+
+.text-toolbar__asset-icon--align { width: 24px; height: 24px; }
+.text-toolbar__asset-icon--strike { width: 24px; height: 24px }
+
+.text-toolbar__popover {
+  position: absolute;
+  top: calc(100% + 9px);
+  left: 50%;
+  z-index: 6;
+  padding: 6px;
+  border: 1px solid #e7e9ed;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 4px 18px rgb(0 0 0 / 14%);
+  transform: translateX(-50%);
+}
+
+.text-toolbar__popover button {
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.text-toolbar__popover--font,
+.text-toolbar__popover--size {
+  display: flex;
+  flex-direction: column;
+  max-height: 238px;
+  overflow-y: auto;
+}
+
+.text-toolbar__popover--font {
+  left: 0;
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+  transform: none;
+}
+.text-toolbar__popover--size { min-width: 76px; }
+.text-toolbar__popover--font button,
+.text-toolbar__popover--size button {
+  padding: 7px 10px;
+  text-align: left;
+}
+.text-toolbar__popover--font button {
+  display: flex;
+  flex: none;
+  align-items: center;
+  width: 100%;
+  height: 38px;
+  padding: 0 10px;
+  white-space: nowrap;
+}
+
+.text-toolbar__popover--font button[aria-pressed='true']:not(:hover) {
+  background: transparent;
+}
+
+.text-toolbar__popover--format,
+.text-toolbar__popover--compact { display: flex; gap: 2px; }
+.text-toolbar__popover--format button,
+.text-toolbar__popover--compact button {
+  display: grid;
+  place-items: center;
+  min-width: 34px;
+  height: 34px;
+  font-size: 18px;
+}
+
+.text-toolbar button:focus-visible { outline: 2px solid #0057ff; outline-offset: 2px; }
