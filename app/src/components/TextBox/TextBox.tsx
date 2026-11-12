@@ -68,6 +68,8 @@ type TextBoxProps = {
   editing: boolean
   focusOnMount: boolean
   scale: number
+  minY: number
+  maxY: number
   onSelect: (id: string) => void
   onEdit: (id: string) => void
   onChange: (id: string, changes: Partial<TextItem>) => void
@@ -77,34 +79,43 @@ type TextBoxProps = {
   onSaveSelection: () => void
 }
 
-export default function TextBox({ item, selected, groupSelected, interactive, editing, focusOnMount, scale, onSelect, onEdit, onChange, onCommit, onDismiss, onEditorRef, onSaveSelection }: TextBoxProps) {
+export default function TextBox({ item, selected, groupSelected, interactive, editing, focusOnMount, scale, minY, maxY, onSelect, onEdit, onChange, onCommit, onDismiss, onEditorRef, onSaveSelection }: TextBoxProps) {
   const editorRef = useRef<HTMLDivElement | null>(null)
   const gesture = useRef<Gesture | null>(null)
   const focusPoint = useRef<{ x: number; y: number } | null>(null)
   const measureHeightRef = useRef<() => void>(() => {})
   const lastValidHtml = useRef(item.html)
+  const lastMeasuredHeight = useRef<number | null>(null)
 
   measureHeightRef.current = () => {
     const editor = editorRef.current
     if (!editor) return
     const contentHeight = Math.ceil(editor.scrollHeight) + 2
-    if (contentHeight > BOARD_HEIGHT) {
-      if (editor.innerHTML !== lastValidHtml.current) {
+    const contentChanged = editor.innerHTML !== lastValidHtml.current
+    if (!contentChanged && lastMeasuredHeight.current === contentHeight) return
+    const availableHeight = Math.min(BOARD_HEIGHT, maxY - minY)
+    if (contentHeight > availableHeight) {
+      if (contentChanged) {
         editor.innerHTML = lastValidHtml.current
+        lastMeasuredHeight.current = Math.ceil(editor.scrollHeight) + 2
         const selection = window.getSelection()
         selection?.selectAllChildren(editor)
         selection?.collapseToEnd()
         if (item.html !== editor.innerHTML) onCommit(item.id, editor.innerHTML, false)
-      } else if (item.fontSize > MIN_FONT_SIZE) {
-        const fontSize = Math.max(MIN_FONT_SIZE, Math.floor(item.fontSize * (BOARD_HEIGHT - 2) / contentHeight))
+      } else if (contentHeight > item.height + 1 && item.fontSize > MIN_FONT_SIZE) {
+        const fontSize = Math.max(MIN_FONT_SIZE, Math.floor(item.fontSize * (availableHeight - 2) / contentHeight))
         if (fontSize < item.fontSize) onChange(item.id, { fontSize })
+        lastMeasuredHeight.current = contentHeight
+      } else {
+        lastMeasuredHeight.current = contentHeight
       }
       return
     }
     lastValidHtml.current = editor.innerHTML
+    lastMeasuredHeight.current = contentHeight
     const height = Math.max(item.baseHeight ?? item.height, contentHeight)
-    const y = Math.min(item.y, BOARD_HEIGHT - height)
-    if (Math.abs(height - item.height) > 0.5 || Math.abs(y - item.y) > 0.5) {
+    if (Math.abs(height - item.height) > 0.5) {
+      const y = Math.max(minY, Math.min(item.y, maxY - height))
       onChange(item.id, { height, y })
     }
   }
@@ -117,7 +128,8 @@ export default function TextBox({ item, selected, groupSelected, interactive, ed
 
   useLayoutEffect(() => {
     measureHeightRef.current()
-  })
+  }, [item.html, item.width, item.height, item.baseHeight, item.fontSize, item.fontFamily,
+    item.bold, item.italic, item.underline, item.strikeThrough, editing])
 
   useEffect(() => {
     const editor = editorRef.current
@@ -201,8 +213,8 @@ export default function TextBox({ item, selected, groupSelected, interactive, ed
       MAX_FONT_SIZE / start.fontSize,
       leftDistance > 0 ? anchorX / leftDistance : Infinity,
       rightDistance > 0 ? (BOARD_WIDTH - anchorX) / rightDistance : Infinity,
-      topDistance > 0 ? anchorY / topDistance : Infinity,
-      bottomDistance > 0 ? (BOARD_HEIGHT - anchorY) / bottomDistance : Infinity,
+      topDistance > 0 ? (anchorY - minY) / topDistance : Infinity,
+      bottomDistance > 0 ? (maxY - anchorY) / bottomDistance : Infinity,
     )
     if (maxFactor < minFactor) return
     const boundedFactor = Math.max(minFactor, Math.min(maxFactor, factor))
@@ -235,7 +247,7 @@ export default function TextBox({ item, selected, groupSelected, interactive, ed
         aria-label="Текст на доске"
         aria-multiline="true"
         data-placeholder="Введите текст"
-        style={{ minHeight: Math.max(30, (item.baseHeight ?? item.height) - 2), maxHeight: BOARD_HEIGHT - 2,
+        style={{ minHeight: Math.max(30, (item.baseHeight ?? item.height) - 2), maxHeight: Math.max(30, item.height - 2),
           fontSize: item.fontSize, fontFamily: item.fontFamily, color: item.color, backgroundColor: item.highlight,
           textAlign: item.align, fontWeight: item.bold ? 700 : undefined, fontStyle: item.italic ? 'italic' : undefined,
           textDecoration: [item.underline && 'underline', item.strikeThrough && 'line-through'].filter(Boolean).join(' ') || undefined }}

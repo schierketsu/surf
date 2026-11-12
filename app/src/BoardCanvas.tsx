@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import ToolPanel, { type NavigationMode } from './components/ToolPanel/ToolPanel'
 import ZoomControls from './components/ZoomControls/ZoomControls'
 import TextBox, { MAX_FONT_SIZE, MIN_FONT_SIZE, MIN_TEXT_HEIGHT, MIN_TEXT_WIDTH, type TextItem } from './components/TextBox/TextBox'
@@ -14,6 +14,14 @@ const MAX_SCALE = 4
 const WHEEL_ZOOM_SENSITIVITY = 0.002
 const INITIAL_TEXT_WIDTH = 180
 const INITIAL_TEXT_HEIGHT = 40
+const VISIBLE_EDGE_GAP = 8
+
+function visibleVerticalBounds(view: View | null, viewportHeight: number) {
+  if (!view || !viewportHeight) return { top: 0, bottom: BOARD_HEIGHT }
+  const top = Math.max(0, Math.min(BOARD_HEIGHT - MIN_TEXT_HEIGHT, (VISIBLE_EDGE_GAP - view.y) / view.scale))
+  const bottom = Math.min(BOARD_HEIGHT, (viewportHeight - VISIBLE_EDGE_GAP - view.y) / view.scale)
+  return { top, bottom: Math.max(top + MIN_TEXT_HEIGHT, bottom) }
+}
 
 function coverScale(width: number, height: number) {
   return Math.max(width / BOARD_WIDTH, height / BOARD_HEIGHT)
@@ -39,27 +47,45 @@ function keepBoardInView(view: View, width: number, height: number): View {
   }
 }
 
-function applyTextChanges(item: TextItem, changes: Partial<TextItem>): TextItem {
+function constrainText(item: TextItem, view?: View | null, viewportHeight = 0): TextItem {
+  const { top, bottom } = visibleVerticalBounds(view ?? null, viewportHeight)
+  const width = Math.max(MIN_TEXT_WIDTH, Math.min(BOARD_WIDTH, item.width))
+  const baseHeight = Math.max(MIN_TEXT_HEIGHT, Math.min(BOARD_HEIGHT, item.baseHeight ?? item.height))
+  const height = Math.max(baseHeight, Math.min(BOARD_HEIGHT, item.height))
+  const maxY = BOARD_HEIGHT - height
+  const fitsViewport = height <= bottom - top
+  return {
+    ...item,
+    width,
+    height,
+    baseHeight,
+    fontSize: Math.max(MIN_FONT_SIZE, Math.min(MAX_FONT_SIZE, item.fontSize)),
+    x: Math.max(0, Math.min(BOARD_WIDTH - width, item.x)),
+    y: fitsViewport
+      ? Math.max(top, Math.min(bottom - height, item.y))
+      : Math.max(0, Math.min(maxY, item.y)),
+  }
+}
+
+function applyTextChanges(item: TextItem, changes: Partial<TextItem>, view?: View | null, viewportHeight = 0): TextItem {
   const next = { ...item, ...changes }
+  if (!['x', 'y', 'width', 'height', 'baseHeight', 'fontSize'].some((key) => key in changes)) return next
   if (changes.fontSize !== undefined && changes.width === undefined && changes.height === undefined) {
     const factor = changes.fontSize / item.fontSize
     next.width = item.width * factor
     next.height = item.height * factor
     next.baseHeight = (item.baseHeight ?? item.height) * factor
   }
-  next.fontSize = Math.max(MIN_FONT_SIZE, Math.min(MAX_FONT_SIZE, next.fontSize))
-  next.baseHeight = Math.max(MIN_TEXT_HEIGHT, next.baseHeight ?? item.height)
-  next.width = Math.max(MIN_TEXT_WIDTH, Math.min(next.width, BOARD_WIDTH - next.x))
-  next.height = Math.max(MIN_TEXT_HEIGHT, Math.min(next.height, BOARD_HEIGHT - next.y))
-  next.x = Math.max(0, Math.min(BOARD_WIDTH - next.width, next.x))
-  next.y = Math.max(0, Math.min(BOARD_HEIGHT - next.height, next.y))
-  return next
+  return constrainText(next, view, viewportHeight)
 }
 
 export default function BoardCanvas() {
   const boardRef = useRef<HTMLElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const viewRef = useRef<View | null>(null)
+  const applyViewRef = useRef<(view: View) => void>(() => {})
+  const ensureTextVisibleIdsRef = useRef(new Set<string>())
+  const pendingTextChangeBaseRef = useRef<TextItem[] | null>(null)
   const zoomRef = useRef<(factor: number) => void>(() => {})
   const textModeRef = useRef(false)
   const navigationModeRef = useRef<NavigationMode>('cursor')
@@ -78,22 +104,29 @@ export default function BoardCanvas() {
   const [selectionRect, setSelectionRect] = useState<SelectionRect | null>(null)
 
   textsRef.current = texts
+  const viewportHeight = () => boardRef.current?.clientHeight ?? 0
 
   const changeText = (id: string, changes: Partial<TextItem>) => {
-    setTexts((current) => current.map((item) => item.id === id ? applyTextChanges(item, changes) : item))
+    ensureTextVisibleIdsRef.current.add(id)
+    pendingTextChangeBaseRef.current = textsRef.current
+    setTexts((current) => current.map((item) => item.id === id ? applyTextChanges(item, changes, viewRef.current, viewportHeight()) : item))
   }
 
   const changeSelectedTexts = (changes: Partial<TextItem>) => {
+    multiSelectedIds.forEach((id) => ensureTextVisibleIdsRef.current.add(id))
+    pendingTextChangeBaseRef.current = textsRef.current
     const ids = new Set(multiSelectedIds)
-    setTexts((current) => current.map((item) => ids.has(item.id) ? applyTextChanges(item, changes) : item))
+    setTexts((current) => current.map((item) => ids.has(item.id) ? applyTextChanges(item, changes, viewRef.current, viewportHeight()) : item))
   }
 
   const scaleSelectedTexts = (startItems: TextItem[], anchorX: number, anchorY: number, factor: number) => {
+    startItems.forEach((item) => ensureTextVisibleIdsRef.current.add(item.id))
+    pendingTextChangeBaseRef.current = textsRef.current
     const originals = new Map(startItems.map((item) => [item.id, item]))
     setTexts((current) => current.map((item) => {
       const start = originals.get(item.id)
       if (!start) return item
-      return {
+      return constrainText({
         ...item,
         x: anchorX + (start.x - anchorX) * factor,
         y: anchorY + (start.y - anchorY) * factor,
@@ -101,7 +134,7 @@ export default function BoardCanvas() {
         height: start.height * factor,
         baseHeight: (start.baseHeight ?? start.height) * factor,
         fontSize: Math.round(start.fontSize * factor * 10) / 10,
-      }
+      }, viewRef.current, viewportHeight())
     }))
   }
 
@@ -110,14 +143,19 @@ export default function BoardCanvas() {
       changeText(id, changes)
       return
     }
+    multiSelectedIds.forEach((selected) => ensureTextVisibleIdsRef.current.add(selected))
+    pendingTextChangeBaseRef.current = textsRef.current
     const ids = new Set(multiSelectedIds)
     setTexts((current) => {
       const source = current.find((item) => item.id === id)
       const group = current.filter((item) => ids.has(item.id))
       if (!source || !group.length) return current
       const dx = Math.max(Math.max(...group.map((item) => -item.x)), Math.min(Math.min(...group.map((item) => BOARD_WIDTH - item.x - item.width)), changes.x! - source.x))
-      const dy = Math.max(Math.max(...group.map((item) => -item.y)), Math.min(Math.min(...group.map((item) => BOARD_HEIGHT - item.y - item.height)), changes.y! - source.y))
-      return current.map((item) => ids.has(item.id) ? { ...item, x: item.x + dx, y: item.y + dy } : item)
+      const { top, bottom } = visibleVerticalBounds(viewRef.current, viewportHeight())
+      const minDy = Math.max(...group.map((item) => top - item.y))
+      const maxDy = Math.min(...group.map((item) => bottom - item.y - item.height))
+      const dy = minDy <= maxDy ? Math.max(minDy, Math.min(maxDy, changes.y! - source.y)) : maxDy
+      return current.map((item) => ids.has(item.id) ? constrainText({ ...item, x: item.x + dx, y: item.y + dy }, viewRef.current, viewportHeight()) : item)
     })
   }
 
@@ -198,6 +236,25 @@ export default function BoardCanvas() {
     changeText(selectedId, { html: editor.innerHTML })
     saveSelection()
   }
+
+  useLayoutEffect(() => {
+    const ids = ensureTextVisibleIdsRef.current
+    if (!ids.size || texts === pendingTextChangeBaseRef.current) return
+    ensureTextVisibleIdsRef.current = new Set()
+    pendingTextChangeBaseRef.current = null
+    const view = viewRef.current
+    if (!view) return
+    const activeTexts = texts.filter((item) => ids.has(item.id))
+    if (!activeTexts.length) return
+    const top = Math.min(...activeTexts.map((item) => item.y))
+    const screenTop = view.y + top * view.scale
+    if (screenTop >= VISIBLE_EDGE_GAP) return
+    const board = boardRef.current
+    if (!board) return
+    const { width, height } = board.getBoundingClientRect()
+    const nextView = keepBoardInView({ ...view, y: view.y + VISIBLE_EDGE_GAP - screenTop }, width, height)
+    if (nextView.y !== view.y) applyViewRef.current(nextView)
+  }, [texts])
 
   useEffect(() => {
     const board = boardRef.current
@@ -320,6 +377,7 @@ export default function BoardCanvas() {
       setViewState(view)
       scheduleDraw()
     }
+    applyViewRef.current = applyView
 
     const updateZoomLimits = (scale: number, width: number, height: number) => {
       const minScale = coverScale(width, height)
@@ -393,8 +451,9 @@ export default function BoardCanvas() {
         const view = viewRef.current
         if (!view) return
         const bounds = board.getBoundingClientRect()
+        const visible = visibleVerticalBounds(view, bounds.height)
         const x = Math.max(0, Math.min(BOARD_WIDTH - INITIAL_TEXT_WIDTH, (event.clientX - bounds.left - view.x) / view.scale))
-        const y = Math.max(0, Math.min(BOARD_HEIGHT - INITIAL_TEXT_HEIGHT, (event.clientY - bounds.top - view.y) / view.scale))
+        const y = Math.max(visible.top, Math.min(visible.bottom - INITIAL_TEXT_HEIGHT, (event.clientY - bounds.top - view.y) / view.scale))
         const id = crypto.randomUUID()
         setTexts((current) => [...current, {
           id, x, y, width: INITIAL_TEXT_WIDTH, height: INITIAL_TEXT_HEIGHT, baseHeight: INITIAL_TEXT_HEIGHT,
@@ -522,6 +581,7 @@ export default function BoardCanvas() {
     underline: selectedTexts.every((item) => Boolean(item.underline)),
     strikeThrough: selectedTexts.every((item) => Boolean(item.strikeThrough)),
   } : undefined
+  const visible = visibleVerticalBounds(viewState, boardRef.current?.clientHeight ?? 0)
 
   return (
     <main ref={boardRef} className={`board${navigationMode === 'hand' ? ' board--hand' : ''}`} aria-label="Поле доски 3840 на 2160 пикселей">
@@ -532,12 +592,13 @@ export default function BoardCanvas() {
         {texts.map((item) => <TextBox key={item.id} item={item} selected={selectedId === item.id || multiSelectedIds.includes(item.id)}
           groupSelected={multiSelectedIds.length > 1 && multiSelectedIds.includes(item.id)} interactive={navigationMode === 'cursor'}
           editing={editingId === item.id} focusOnMount={focusId === item.id && editingId === item.id}
-          scale={viewState.scale} onSelect={selectText} onEdit={editText} onChange={changeTextFromBox} onCommit={commitText}
+          scale={viewState.scale} minY={visible.top} maxY={visible.bottom}
+          onSelect={selectText} onEdit={editText} onChange={changeTextFromBox} onCommit={commitText}
           onDismiss={() => { clearTextSelection(); setSelectedId(null); setMultiSelectedIds([]); setEditingId(null); setFocusId(null) }} onSaveSelection={saveSelection}
           onEditorRef={(id, node) => { if (node) editorRefs.current.set(id, node); else editorRefs.current.delete(id) }} />)}
       </div>}
       {viewState && navigationMode === 'cursor' && selectedTexts.length > 1 && <GroupSelection items={selectedTexts} view={viewState}
-        onScale={scaleSelectedTexts} />}
+        minY={visible.top} maxY={visible.bottom} onScale={scaleSelectedTexts} />}
       {selectionRect && <div className="board-selection" style={selectionRect} aria-hidden="true" />}
       {selectedText && viewState && navigationMode === 'cursor' && <TextToolbar key={multiSelectedIds.length ? multiSelectedIds.join(':') : selectedText.id}
         item={selectedText} centerX={toolbarCenterX} top={toolbarTop} activeFormatsOverride={groupFormats}

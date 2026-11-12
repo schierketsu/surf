@@ -1,5 +1,5 @@
 import { useRef } from 'react'
-import { BOARD_HEIGHT, BOARD_WIDTH } from '../../gridHierarchy'
+import { BOARD_WIDTH } from '../../gridHierarchy'
 import { MAX_FONT_SIZE, MIN_FONT_SIZE, MIN_TEXT_HEIGHT, MIN_TEXT_WIDTH, type TextItem } from '../TextBox/TextBox'
 import './GroupSelection.css'
 
@@ -19,6 +19,8 @@ type Gesture = {
 type GroupSelectionProps = {
   items: TextItem[]
   view: { x: number; y: number; scale: number }
+  minY: number
+  maxY: number
   onScale: (items: TextItem[], anchorX: number, anchorY: number, factor: number) => void
 }
 
@@ -45,7 +47,7 @@ function getBounds(items: TextItem[]): Bounds {
   }
 }
 
-export default function GroupSelection({ items, view, onScale }: GroupSelectionProps) {
+export default function GroupSelection({ items, view, minY, maxY, onScale }: GroupSelectionProps) {
   const gesture = useRef<Gesture | null>(null)
   const bounds = getBounds(items)
 
@@ -92,8 +94,8 @@ export default function GroupSelection({ items, view, onScale }: GroupSelectionP
       ...start.items.map((item) => MAX_FONT_SIZE / item.fontSize),
       anchorX > start.bounds.left ? anchorX / (anchorX - start.bounds.left) : Infinity,
       anchorX < start.bounds.right ? (BOARD_WIDTH - anchorX) / (start.bounds.right - anchorX) : Infinity,
-      anchorY > start.bounds.top ? anchorY / (anchorY - start.bounds.top) : Infinity,
-      anchorY < start.bounds.bottom ? (BOARD_HEIGHT - anchorY) / (start.bounds.bottom - anchorY) : Infinity,
+      anchorY > start.bounds.top ? (anchorY - minY) / (anchorY - start.bounds.top) : Infinity,
+      anchorY < start.bounds.bottom ? (maxY - anchorY) / (start.bounds.bottom - anchorY) : Infinity,
     )
     if (maxFactor < minFactor) return
     onScale(start.items, anchorX, anchorY, Math.max(minFactor, Math.min(maxFactor, requestedFactor)))
