@@ -233,7 +233,7 @@ export default function TextBox({ item, selected, groupSelected, interactive, ed
   return (
     <div
       className={`text-box${selected ? ' text-box--selected' : ''}`}
-      style={{ left: item.x, top: item.y, width: item.width, height: item.height, opacity: item.opacity }}
+      style={{ left: item.x, top: item.y, width: item.width, height: item.height, opacity: item.opacity, backgroundColor: item.highlight }}
       onPointerDown={(event) => { event.stopPropagation(); onSelect(item.id) }}
     >
       <div
@@ -248,7 +248,7 @@ export default function TextBox({ item, selected, groupSelected, interactive, ed
         aria-multiline="true"
         data-placeholder="Введите текст"
         style={{ minHeight: Math.max(30, (item.baseHeight ?? item.height) - 2), maxHeight: Math.max(30, item.height - 2),
-          fontSize: item.fontSize, fontFamily: item.fontFamily, color: item.color, backgroundColor: item.highlight,
+          fontSize: item.fontSize, fontFamily: item.fontFamily, color: item.color,
           textAlign: item.align, fontWeight: item.bold ? 700 : undefined, fontStyle: item.italic ? 'italic' : undefined,
           textDecoration: [item.underline && 'underline', item.strikeThrough && 'line-through'].filter(Boolean).join(' ') || undefined }}
         onInput={() => measureHeightRef.current()}

@@ -79,6 +79,21 @@ function applyTextChanges(item: TextItem, changes: Partial<TextItem>, view?: Vie
   return constrainText(next, view, viewportHeight)
 }
 
+function clearInlineTextColors(root: HTMLElement) {
+  root.querySelectorAll<HTMLElement>('*').forEach((element) => {
+    element.removeAttribute('color')
+    element.style.removeProperty('color')
+    if (!element.getAttribute('style')?.trim()) element.removeAttribute('style')
+  })
+}
+
+function withoutInlineTextColors(html: string) {
+  const container = document.createElement('div')
+  container.innerHTML = html
+  clearInlineTextColors(container)
+  return container.innerHTML
+}
+
 export default function BoardCanvas() {
   const boardRef = useRef<HTMLElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -235,6 +250,44 @@ export default function BoardCanvas() {
     document.execCommand(command, false, value)
     changeText(selectedId, { html: editor.innerHTML })
     saveSelection()
+  }
+
+  const setTextColor = (color: string) => {
+    if (multiSelectedIds.length) {
+      multiSelectedIds.forEach((id) => ensureTextVisibleIdsRef.current.add(id))
+      pendingTextChangeBaseRef.current = textsRef.current
+      const ids = new Set(multiSelectedIds)
+      setTexts((current) => current.map((item) => ids.has(item.id)
+        ? { ...item, color, html: withoutInlineTextColors(item.html) }
+        : item))
+      selectionRef.current = null
+      return
+    }
+    if (!selectedId) return
+    const editor = editorRefs.current.get(selectedId)
+    const selection = window.getSelection()
+    const currentRange = selection?.rangeCount ? selection.getRangeAt(0) : null
+    const range = currentRange && editor?.contains(currentRange.commonAncestorContainer)
+      ? currentRange.collapsed ? null : currentRange.cloneRange()
+      : selectionRef.current && !selectionRef.current.collapsed ? selectionRef.current : null
+    if (editor?.isContentEditable && selection && range && !range.collapsed && editor.contains(range.commonAncestorContainer)) {
+      editor.focus()
+      selection.removeAllRanges()
+      selection.addRange(range)
+      if (document.execCommand('foreColor', false, color)) {
+        changeText(selectedId, { html: editor.innerHTML })
+        saveSelection()
+        return
+      }
+    }
+    if (editor?.isContentEditable) {
+      clearInlineTextColors(editor)
+      changeText(selectedId, { color, html: editor.innerHTML })
+    } else {
+      const item = textsRef.current.find((text) => text.id === selectedId)
+      if (item) changeText(selectedId, { color, html: withoutInlineTextColors(item.html) })
+    }
+    selectionRef.current = null
   }
 
   const deleteSelectedTexts = () => {
@@ -636,9 +689,9 @@ export default function BoardCanvas() {
         onScale={scaleSelectedTexts} />}
       {selectionRect && <div className="board-selection" style={selectionRect} aria-hidden="true" />}
       {selectedText && viewState && navigationMode === 'cursor' && <TextToolbar key={multiSelectedIds.length ? multiSelectedIds.join(':') : selectedText.id}
-        item={selectedText} centerX={toolbarCenterX} top={toolbarTop} activeFormatsOverride={groupFormats}
+        item={selectedText} items={selectedTexts} centerX={toolbarCenterX} top={toolbarTop} activeFormatsOverride={groupFormats}
         onChange={(changes) => multiSelectedIds.length ? changeSelectedTexts(changes) : changeText(selectedText.id, changes)}
-        onFormat={formatText} onDelete={deleteSelectedTexts} />}
+        onFormat={formatText} onColor={setTextColor} onDelete={deleteSelectedTexts} />}
       <ToolPanel resetToCursorToken={resetToCursorToken} onNavigationModeChange={(mode) => {
         navigationModeRef.current = mode
         setNavigationMode(mode)
