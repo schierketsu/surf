@@ -115,6 +115,7 @@
 
 .text-toolbar__asset-icon--align { width: 24px; height: 24px; }
 .text-toolbar__asset-icon--strike { width: 24px; height: 24px }
+.text-toolbar__asset-icon--more { width: 24px; height: 24px; }
 
 .text-toolbar__popover {
   position: absolute;
@@ -181,6 +182,29 @@
   min-width: 34px;
   height: 34px;
   font-size: 18px;
+}
+
+.text-toolbar__popover--more {
+  right: 0;
+  left: auto;
+  width: 218px;
+  transform: none;
+}
+
+.text-toolbar__popover .text-toolbar__menu-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  min-height: 36px;
+  padding: 0 10px;
+  font-size: inherit;
+  text-align: left;
+}
+
+.text-toolbar__shortcut {
+  color: #778397;
+  font-size: inherit;
 }
 
 .text-toolbar button:focus-visible { outline: 2px solid #0057ff; outline-offset: 2px; }

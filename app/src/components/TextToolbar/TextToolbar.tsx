@@ -7,9 +7,10 @@ import underlineIcon from './icons/underline.png'
 import alignLeftIcon from './icons/left.png'
 import alignCenterIcon from './icons/center.png'
 import alignRightIcon from './icons/right.png'
+import moreIcon from './icons/dots.png'
 import './TextToolbar.css'
 
-type Menu = 'font' | 'size' | 'format' | 'align' | null
+type Menu = 'font' | 'size' | 'format' | 'align' | 'more' | null
 type FormatCommand = 'bold' | 'italic' | 'underline' | 'strikeThrough'
 type ActiveFormats = Record<FormatCommand, boolean>
 
@@ -29,9 +30,10 @@ type TextToolbarProps = {
   activeFormatsOverride?: ActiveFormats
   onChange: (changes: Partial<TextItem>) => void
   onFormat: (command: string) => void
+  onDelete: () => void
 }
 
-export default function TextToolbar({ item, centerX, top, activeFormatsOverride, onChange, onFormat }: TextToolbarProps) {
+export default function TextToolbar({ item, centerX, top, activeFormatsOverride, onChange, onFormat, onDelete }: TextToolbarProps) {
   const toolbarRef = useRef<HTMLDivElement>(null)
   const [menu, setMenu] = useState<Menu>(null)
   const [toolbarWidth, setToolbarWidth] = useState(0)
@@ -153,6 +155,18 @@ export default function TextToolbar({ item, centerX, top, activeFormatsOverride,
               aria-pressed={item.align === align} onClick={() => { onChange({ align }); setMenu(null) }}>
               <img className="text-toolbar__asset-icon text-toolbar__asset-icon--align" src={ALIGN_ICONS[align]} alt="" aria-hidden="true" />
             </button>)}
+          </div>}
+        </div>
+
+        <span className="text-toolbar__divider" />
+
+        <div className="text-toolbar__control">
+          <button className="text-toolbar__icon-button" type="button" aria-label="Дополнительные действия" aria-expanded={menu === 'more'}
+            onClick={() => toggleMenu('more')}><img className="text-toolbar__asset-icon text-toolbar__asset-icon--more" src={moreIcon} alt="" aria-hidden="true" /></button>
+          {menu === 'more' && <div className="text-toolbar__popover text-toolbar__popover--more" role="group" aria-label="Дополнительные действия">
+            <button className="text-toolbar__menu-item" type="button" onClick={onDelete}>
+              <span>Удалить</span><span className="text-toolbar__shortcut">Delete</span>
+            </button>
           </div>}
         </div>
 

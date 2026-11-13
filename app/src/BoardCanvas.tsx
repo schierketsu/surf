@@ -237,6 +237,36 @@ export default function BoardCanvas() {
     saveSelection()
   }
 
+  const deleteSelectedTexts = () => {
+    const ids = multiSelectedIds.length ? multiSelectedIds : selectedId ? [selectedId] : []
+    if (!ids.length) return
+    const deletedIds = new Set(ids)
+    setTexts((current) => current.filter((item) => !deletedIds.has(item.id)))
+    setSelectedId(null)
+    setMultiSelectedIds([])
+    setEditingId(null)
+    setFocusId(null)
+    selectionRef.current = null
+    window.getSelection()?.removeAllRanges()
+  }
+
+  useEffect(() => {
+    const ids = multiSelectedIds.length ? multiSelectedIds : selectedId ? [selectedId] : []
+    if (!ids.length || navigationMode !== 'cursor') return
+
+    const onDelete = (event: KeyboardEvent) => {
+      if (event.key !== 'Delete' || event.defaultPrevented) return
+      const target = event.target
+      if (target instanceof HTMLElement && (target.isContentEditable || target.closest('input, textarea, select'))) return
+
+      event.preventDefault()
+      deleteSelectedTexts()
+    }
+
+    window.addEventListener('keydown', onDelete)
+    return () => window.removeEventListener('keydown', onDelete)
+  }, [selectedId, multiSelectedIds, navigationMode])
+
   useLayoutEffect(() => {
     const ids = ensureTextVisibleIdsRef.current
     if (!ids.size || texts === pendingTextChangeBaseRef.current) return
@@ -598,11 +628,17 @@ export default function BoardCanvas() {
           onEditorRef={(id, node) => { if (node) editorRefs.current.set(id, node); else editorRefs.current.delete(id) }} />)}
       </div>}
       {viewState && navigationMode === 'cursor' && selectedTexts.length > 1 && <GroupSelection items={selectedTexts} view={viewState}
-        minY={visible.top} maxY={visible.bottom} onScale={scaleSelectedTexts} />}
+        minY={visible.top} maxY={visible.bottom}
+        onMove={(items, dx, dy) => {
+          const source = items[0]
+          if (source) changeTextFromBox(source.id, { x: source.x + dx, y: source.y + dy })
+        }}
+        onScale={scaleSelectedTexts} />}
       {selectionRect && <div className="board-selection" style={selectionRect} aria-hidden="true" />}
       {selectedText && viewState && navigationMode === 'cursor' && <TextToolbar key={multiSelectedIds.length ? multiSelectedIds.join(':') : selectedText.id}
         item={selectedText} centerX={toolbarCenterX} top={toolbarTop} activeFormatsOverride={groupFormats}
-        onChange={(changes) => multiSelectedIds.length ? changeSelectedTexts(changes) : changeText(selectedText.id, changes)} onFormat={formatText} />}
+        onChange={(changes) => multiSelectedIds.length ? changeSelectedTexts(changes) : changeText(selectedText.id, changes)}
+        onFormat={formatText} onDelete={deleteSelectedTexts} />}
       <ToolPanel resetToCursorToken={resetToCursorToken} onNavigationModeChange={(mode) => {
         navigationModeRef.current = mode
         setNavigationMode(mode)

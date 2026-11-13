@@ -15,12 +15,14 @@ type Gesture = {
   bounds: Bounds
   items: TextItem[]
 }
+type MoveGesture = { pointerId: number; clientX: number; clientY: number; items: TextItem[] }
 
 type GroupSelectionProps = {
   items: TextItem[]
   view: { x: number; y: number; scale: number }
   minY: number
   maxY: number
+  onMove: (items: TextItem[], dx: number, dy: number) => void
   onScale: (items: TextItem[], anchorX: number, anchorY: number, factor: number) => void
 }
 
@@ -47,9 +49,38 @@ function getBounds(items: TextItem[]): Bounds {
   }
 }
 
-export default function GroupSelection({ items, view, minY, maxY, onScale }: GroupSelectionProps) {
+export default function GroupSelection({ items, view, minY, maxY, onMove, onScale }: GroupSelectionProps) {
   const gesture = useRef<Gesture | null>(null)
+  const moveGesture = useRef<MoveGesture | null>(null)
   const bounds = getBounds(items)
+  const screenBounds = {
+    left: view.x + bounds.left * view.scale,
+    top: view.y + bounds.top * view.scale,
+    width: (bounds.right - bounds.left) * view.scale,
+    height: (bounds.bottom - bounds.top) * view.scale,
+  }
+
+  const startMove = (event: React.PointerEvent<HTMLButtonElement>) => {
+    event.preventDefault()
+    event.stopPropagation()
+    moveGesture.current = {
+      pointerId: event.pointerId, clientX: event.clientX, clientY: event.clientY,
+      items: items.map((item) => ({ ...item })),
+    }
+    event.currentTarget.setPointerCapture(event.pointerId)
+  }
+
+  const continueMove = (event: React.PointerEvent<HTMLButtonElement>) => {
+    const start = moveGesture.current
+    if (!start || start.pointerId !== event.pointerId) return
+    onMove(start.items, (event.clientX - start.clientX) / view.scale, (event.clientY - start.clientY) / view.scale)
+  }
+
+  const endMove = (event: React.PointerEvent<HTMLButtonElement>) => {
+    if (moveGesture.current?.pointerId !== event.pointerId) return
+    moveGesture.current = null
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId)
+  }
 
   const startScale = (event: React.PointerEvent<HTMLButtonElement>, corner?: Corner, edge?: Edge) => {
     event.preventDefault()
@@ -108,12 +139,11 @@ export default function GroupSelection({ items, view, minY, maxY, onScale }: Gro
   }
 
   return (
-    <div className="group-selection" style={{
-      left: view.x + bounds.left * view.scale,
-      top: view.y + bounds.top * view.scale,
-      width: (bounds.right - bounds.left) * view.scale,
-      height: (bounds.bottom - bounds.top) * view.scale,
-    }}>
+    <>
+    <button type="button" className="group-selection__move-area" style={screenBounds}
+      aria-label="Переместить выделенные объекты" title="Перетащить выделенную группу"
+      onPointerDown={startMove} onPointerMove={continueMove} onPointerUp={endMove} onPointerCancel={endMove} />
+    <div className="group-selection" style={screenBounds}>
       {EDGES.map(({ edge, label }) => <button key={edge} type="button"
         className={`group-selection__drag-area group-selection__drag-area--${edge}`}
         aria-label={`Масштабировать выделенные тексты: ${label} граница`}
@@ -131,5 +161,6 @@ export default function GroupSelection({ items, view, minY, maxY, onScale }: Gro
         onPointerUp={endScale}
         onPointerCancel={endScale} />)}
     </div>
+    </>
   )
 }

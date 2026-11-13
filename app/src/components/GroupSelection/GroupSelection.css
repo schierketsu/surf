@@ -6,6 +6,16 @@
   pointer-events: none;
 }
 
+.group-selection__move-area {
+  position: absolute;
+  z-index: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: move;
+  touch-action: none;
+}
+
 .group-selection__handle {
   position: absolute;
   z-index: 2;
