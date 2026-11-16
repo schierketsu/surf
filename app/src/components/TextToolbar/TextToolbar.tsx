@@ -24,19 +24,12 @@ const FONTS = [
 ]
 const ALIGN_ICONS = { left: alignLeftIcon, center: alignCenterIcon, right: alignRightIcon }
 const TEXT_COLORS = [
-  { name: 'Светло-жёлтый', value: '#FFF4B3' }, { name: 'Жёлтый', value: '#FFC400' },
-  { name: 'Белый', value: '#FFFFFF' },
-  { name: 'Персиковый', value: '#F6D3B5' }, { name: 'Оранжевый', value: '#FF6D00' },
-  { name: 'Светло-серый', value: '#E5E5E5' },
-  { name: 'Светло-розовый', value: '#FFC2C7' }, { name: 'Розовый', value: '#FF3366' },
-  { name: 'Красный', value: '#E60023' }, { name: 'Серый', value: '#A8A8A8' },
-  { name: 'Мятный', value: '#A5EBC8' }, { name: 'Зелёный', value: '#00C853' },
-  { name: 'Тёмно-зелёный', value: '#087532' }, { name: 'Тёмно-серый', value: '#5F5F5F' },
-  { name: 'Светло-синий', value: '#C4DCFA' }, { name: 'Голубой', value: '#5E9BF0' },
-  { name: 'Синий', value: '#0057FF' }, { name: 'Чёрный', value: '#272727' },
-  { name: 'Лавандовый', value: '#DED8FA' }, { name: 'Фиолетовый', value: '#7C3AED' },
-  { name: 'Пурпурный', value: '#D500F9' }, { name: 'Бирюзовый', value: '#00AFAF' },
-  { name: 'Лаймовый', value: '#84CC16' },
+  { name: 'Синий', value: '#0057FF' }, { name: 'Зелёный', value: '#00C853' },
+  { name: 'Фиолетовый', value: '#7C3AED' }, { name: 'Жёлтый', value: '#FFC400' },
+  { name: 'Розовый', value: '#FF3366' }, { name: 'Оранжевый', value: '#FF6D00' },
+  { name: 'Красный', value: '#E60023' }, { name: 'Бирюзовый', value: '#00AFAF' },
+  { name: 'Пурпурный', value: '#D500F9' }, { name: 'Лаймовый', value: '#84CC16' },
+  { name: 'Тёмный', value: '#272727' }, { name: 'Белый', value: '#FFFFFF' },
 ]
 
 function normalizeColor(value: string) {
@@ -105,7 +98,7 @@ export default function TextToolbar({ item, items, centerX, top, activeFormatsOv
   const [inlineColor, setInlineColor] = useState<string | null>(null)
   const [, refreshColors] = useState(0)
   const background = parseBackground(item.highlight)
-  const lastBackgroundColor = useRef(background.color ?? '#FFF4B3')
+  const lastBackgroundColor = useRef(background.color ?? '#FFC400')
   const toggleMenu = (next: Menu) => setMenu((current) => current === next ? null : next)
   const setSize = (size: number) => onChange({ fontSize: Math.max(MIN_FONT_SIZE, Math.min(MAX_FONT_SIZE, size)) })
   const fontName = FONTS.find((font) => font.value === item.fontFamily)?.label ?? 'Doska'
@@ -293,10 +286,10 @@ export default function TextToolbar({ item, items, centerX, top, activeFormatsOv
                 style={{ background: background.color === null
                   ? 'conic-gradient(#d8dce1 25%, #fff 0 50%, #d8dce1 0 75%, #fff 0) 0 0 / 8px 8px'
                   : `linear-gradient(90deg, transparent, ${backgroundHue}), conic-gradient(#d8dce1 25%, #fff 0 50%, #d8dce1 0 75%, #fff 0) 0 0 / 8px 8px` }}
-                onPointerDown={(event) => { event.currentTarget.setPointerCapture(event.pointerId); setBackgroundFromPointer(event) }}
-                onPointerMove={(event) => { if (event.currentTarget.hasPointerCapture(event.pointerId)) setBackgroundFromPointer(event) }}
+                onPointerDown={(event) => { if (background.color === null) return; event.currentTarget.setPointerCapture(event.pointerId); setBackgroundFromPointer(event) }}
+                onPointerMove={(event) => { if (background.color !== null && event.currentTarget.hasPointerCapture(event.pointerId)) setBackgroundFromPointer(event) }}
                 onPointerUp={(event) => { if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId) }}
-                onChange={(event) => setBackground(backgroundHue, Number(event.target.value))} />
+                onChange={(event) => { if (background.color !== null) setBackground(backgroundHue, Number(event.target.value)) }} />
             </div>
           </div>}
         </div>
