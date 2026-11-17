@@ -5,9 +5,11 @@ import arrowHeadImage from '../../assets/arrow.png'
 export type Point = { x: number; y: number }
 export type Anchor = Point & { textId?: string; side?: ConnectorSide }
 export type BendOffset = { along: number; normal: number }
-export type Arrow = { id: string; tail: Anchor; head: Anchor; bend: Point; bendOffset?: BendOffset; bendEdited?: boolean; color: string }
+export type ArrowShape = 'straight' | 'elbow' | 'curved'
+export type ArrowDash = 'solid' | 'long' | 'short'
+export type Arrow = { id: string; tail: Anchor; head: Anchor; bend: Point; bendOffset?: BendOffset; bendEdited?: boolean; color: string; shape?: ArrowShape; dash?: ArrowDash; curveBends?: [Point, Point, Point]; pendingStraightBend?: Point }
 export type ArrowDrag = { kind: 'new' | 'tail' | 'head' | 'bend'; arrowId?: string; tail?: Anchor;
-  startClient?: Point; pointerId?: number; active?: boolean }
+  startClient?: Point; pointerId?: number; active?: boolean; bendIndex?: number }
 
 export function anchorPoint(item: TextItem, side: ConnectorSide): Point {
   const offset = 9
@@ -241,6 +243,78 @@ function visibleRoute(from: Point, to: Point, boxes: Hitbox[]): Point[] | null {
   return route.reverse()
 }
 
+function orthogonalRoute(from: Point, to: Point, boxes: Hitbox[]): Point[] | null {
+  const xs = [...new Set([from.x, to.x, (from.x + to.x) / 2, 0, BOARD_WIDTH,
+    ...boxes.flatMap((box) => [box.left, box.right])])].filter((x) => x >= 0 && x <= BOARD_WIDTH).sort((a, b) => a - b)
+  const ys = [...new Set([from.y, to.y, (from.y + to.y) / 2, 0, BOARD_HEIGHT,
+    ...boxes.flatMap((box) => [box.top, box.bottom])])].filter((y) => y >= 0 && y <= BOARD_HEIGHT).sort((a, b) => a - b)
+  const nodes = xs.flatMap((x, column) => ys.map((y, row) => ({ point: { x, y }, column, row })))
+  const width = ys.length
+  const start = xs.indexOf(from.x) * width + ys.indexOf(from.y)
+  const finish = xs.indexOf(to.x) * width + ys.indexOf(to.y)
+  if (start < 0 || finish < 0) return null
+  // Keep the incoming axis in the search state so equal-length routes prefer fewer turns.
+  const distance = nodes.flatMap(() => [Infinity, Infinity])
+  const previous = nodes.flatMap(() => [-1, -1])
+  const visited = nodes.flatMap(() => [false, false])
+  distance[start * 2] = 0
+  distance[start * 2 + 1] = 0
+  for (let count = 0; count < distance.length; count++) {
+    let current = -1
+    for (let i = 0; i < distance.length; i++) {
+      if (!visited[i] && (current < 0 || distance[i] < distance[current])) current = i
+    }
+    if (current < 0 || !Number.isFinite(distance[current]) || Math.floor(current / 2) === finish) break
+    visited[current] = true
+    const node = Math.floor(current / 2)
+    const { column, row } = nodes[node]
+    for (const [neighbor, axis] of [
+      [column > 0 ? node - width : -1, 0], [column + 1 < xs.length ? node + width : -1, 0],
+      [row > 0 ? node - 1 : -1, 1], [row + 1 < width ? node + 1 : -1, 1],
+    ]) {
+      if (neighbor < 0) continue
+      const next = neighbor * 2 + axis
+      if (visited[next] || boxes.some((box) => inside(nodes[neighbor].point, box)
+        || crosses(nodes[node].point, nodes[neighbor].point, box))) continue
+      const a = nodes[node].point
+      const b = nodes[neighbor].point
+      const turnCost = node === start || current % 2 === axis ? 0 : 24
+      const cost = distance[current] + Math.abs(a.x - b.x) + Math.abs(a.y - b.y) + turnCost
+      if (cost < distance[next]) { distance[next] = cost; previous[next] = current }
+    }
+  }
+  const finishState = distance[finish * 2] <= distance[finish * 2 + 1] ? finish * 2 : finish * 2 + 1
+  if (!Number.isFinite(distance[finishState])) return null
+  const route: Point[] = []
+  for (let i = finishState; i >= 0; i = previous[i]) route.push(nodes[Math.floor(i / 2)].point)
+  return route.reverse().filter((_, index, all) => index === 0 || index === all.length - 1 ||
+    (all[index - 1].x !== all[index + 1].x && all[index - 1].y !== all[index + 1].y))
+}
+
+function centeredOrthogonalRoute(from: Point, to: Point, boxes: Hitbox[], horizontalFirst: boolean,
+  horizontalLast: boolean): Point[] | null {
+  const midpoint = horizontalFirst === horizontalLast
+    ? horizontalFirst ? (from.x + to.x) / 2 : (from.y + to.y) / 2
+    : 0
+  const coordinates = horizontalFirst === horizontalLast
+    ? [midpoint, ...boxes.flatMap((box) => horizontalFirst ? [box.left, box.right] : [box.top, box.bottom])]
+      .sort((a, b) => Math.abs(a - midpoint) - Math.abs(b - midpoint))
+    : [0]
+  for (const coordinate of coordinates) {
+    const corners = horizontalFirst === horizontalLast
+      ? horizontalFirst
+        ? [{ x: coordinate, y: from.y }, { x: coordinate, y: to.y }]
+        : [{ x: from.x, y: coordinate }, { x: to.x, y: coordinate }]
+      : horizontalFirst ? [{ x: to.x, y: from.y }] : [{ x: from.x, y: to.y }]
+    const points = [from, ...corners, to]
+    if (points.some((point) => point.x < 0 || point.x > BOARD_WIDTH || point.y < 0 || point.y > BOARD_HEIGHT)) continue
+    if (points.slice(1).some((point, index) => boxes.some((box) => inside(point, box)
+      || crosses(points[index], point, box)))) continue
+    return points
+  }
+  return null
+}
+
 function pathThrough(points: Point[], radius: number, boxes: Hitbox[]): { path: string; handle: Point } | null {
   let path = `M ${points[0].x} ${points[0].y}`
   const drawn = [points[0]]
@@ -288,11 +362,83 @@ function routeMiddle(points: Point[]): Point {
 }
 
 export function arrowGeometry(tail: Anchor, head: Anchor, bend: Point, texts: TextItem[], bendEdited = false,
-  bendOffset?: BendOffset, avoidObstacles = true) {
+  bendOffset?: BendOffset, avoidObstacles = true, shape: ArrowShape = 'curved', curveBends?: [Point, Point, Point], pendingStraightBend?: Point) {
   bend = relativeBend(tail, head, bend, bendOffset, texts)
   const start = resolveArrowHead(tail, texts)
   const tip = resolveArrowHead(head, texts)
   const end = resolveArrowShaftEnd(tail, head, texts)
+  if (shape === 'straight') {
+    const last = curveBends?.[2] ?? pendingStraightBend ?? start
+    const dx = tip.x - last.x
+    const dy = tip.y - last.y
+    const length = Math.hypot(dx, dy) || 1
+    const straightEnd = { x: tip.x - dx / length * 16, y: tip.y - dy / length * 16 }
+    const center = { x: (start.x + straightEnd.x) / 2, y: (start.y + straightEnd.y) / 2 }
+    if (curveBends) return { start, tip, end: straightEnd,
+      path: `M ${start.x} ${start.y} ${curveBends.map((point) => `L ${point.x} ${point.y}`).join(' ')} L ${straightEnd.x} ${straightEnd.y}`,
+      handle: curveBends[1], bendHandles: curveBends }
+    if (pendingStraightBend) return { start, tip, end: straightEnd,
+      path: `M ${start.x} ${start.y} L ${pendingStraightBend.x} ${pendingStraightBend.y} L ${straightEnd.x} ${straightEnd.y}`,
+      handle: pendingStraightBend, bendHandles: [pendingStraightBend] }
+    return { start, tip, end: straightEnd,
+      path: `M ${start.x} ${start.y} L ${straightEnd.x} ${straightEnd.y}`, handle: center, bendHandles: [center] }
+  }
+  if (shape === 'curved' && curveBends) {
+    const last = curveBends[2]
+    const dx = tip.x - last.x
+    const dy = tip.y - last.y
+    const length = Math.hypot(dx, dy) || 1
+    const curveEnd = { x: tip.x - dx / length * 16, y: tip.y - dy / length * 16 }
+    const points = [start, ...curveBends, curveEnd]
+    let path = `M ${start.x} ${start.y}`
+    for (let i = 0; i < points.length - 1; i++) {
+      const before = points[Math.max(0, i - 1)]
+      const from = points[i]
+      const to = points[i + 1]
+      const after = points[Math.min(points.length - 1, i + 2)]
+      const first = { x: from.x + (to.x - before.x) / 6, y: from.y + (to.y - before.y) / 6 }
+      const second = { x: to.x - (after.x - from.x) / 6, y: to.y - (after.y - from.y) / 6 }
+      path += ` C ${first.x} ${first.y} ${second.x} ${second.y} ${to.x} ${to.y}`
+    }
+    return { start, tip, end: curveEnd, path, handle: curveBends[1], bendHandles: curveBends }
+  }
+  if (shape === 'elbow') {
+    const horizontalFirst = tail.side === 'left' || tail.side === 'right' ||
+      (!tail.side && Math.abs(end.x - start.x) >= Math.abs(end.y - start.y))
+    const horizontalLast = head.side === 'left' || head.side === 'right' ||
+      (!head.side && horizontalFirst)
+    if (avoidObstacles) {
+      for (const padding of [18, 8, 1]) {
+        const departure = tail.side ? sideDirection(tail.side, { x: 0, y: 0 }) : null
+        const arrival = head.side ? sideDirection(head.side, { x: 0, y: 0 }) : null
+        const from = departure ? { x: start.x + departure.x * (padding + 4), y: start.y + departure.y * (padding + 4) } : start
+        const to = arrival ? { x: tip.x + arrival.x * (padding + 4), y: tip.y + arrival.y * (padding + 4) } : end
+        const boxes = texts.map((item) => hitbox(item, padding))
+        const clearLeg = (a: Point, b: Point, attachedId?: string) => !texts.some((item, index) =>
+          item.id !== attachedId && crosses(a, b, boxes[index]))
+        if (!clearLeg(start, from, tail.textId) || !clearLeg(to, end, head.textId)) continue
+        const route = centeredOrthogonalRoute(from, to, boxes, horizontalFirst, horizontalLast)
+          ?? orthogonalRoute(from, to, boxes)
+        if (!route) continue
+        const points = [start, ...route, end]
+          .filter((point, index, all) => index === 0 || point.x !== all[index - 1].x || point.y !== all[index - 1].y)
+        return { start, tip, end, path: `M ${points.map((point) => `${point.x} ${point.y}`).join(' L ')}`,
+          handle: routeMiddle(points) }
+      }
+    }
+    const middleX = (start.x + end.x) / 2
+    const middleY = (start.y + end.y) / 2
+    const corners = horizontalFirst === horizontalLast
+      ? horizontalFirst
+        ? [{ x: middleX, y: start.y }, { x: middleX, y: end.y }]
+        : [{ x: start.x, y: middleY }, { x: end.x, y: middleY }]
+      : horizontalFirst
+        ? [{ x: middleX, y: start.y }, { x: middleX, y: middleY }, { x: end.x, y: middleY }]
+        : [{ x: start.x, y: middleY }, { x: middleX, y: middleY }, { x: middleX, y: end.y }]
+    return { start, tip, end,
+      path: `M ${start.x} ${start.y} ${corners.map((corner) => `L ${corner.x} ${corner.y}`).join(' ')} L ${end.x} ${end.y}`,
+      handle: corners[Math.floor(corners.length / 2)] }
+  }
   const finalDirection = sideDirection(undefined, { x: tip.x - end.x, y: tip.y - end.y })
   const straightLength = Math.min(28, Math.hypot(end.x - start.x, end.y - start.y) * .25)
   const curveEnd = { x: end.x - finalDirection.x * straightLength,
@@ -386,22 +532,25 @@ type Props = {
 
 export default function ArrowLayer({ arrows, texts, geometries, view, selectedId, preview, onSelect, onDrag }: Props) {
   const selectedGeometry = selectedId ? geometries.get(selectedId) : null
-  const handle = (point: Point, kind: 'tail' | 'head' | 'bend') => <button key={kind} type="button"
+  const selectedBendHandles = selectedGeometry && 'bendHandles' in selectedGeometry ? selectedGeometry.bendHandles : null
+  const handle = (point: Point, kind: 'tail' | 'head' | 'bend', bendIndex?: number) => <button key={`${kind}-${bendIndex ?? ''}`} type="button"
     className={kind === 'bend' ? 'text-box__midpoint board-arrow-handle--bend' : 'text-box__handle'}
     aria-label={kind === 'tail' ? 'Перетащить начало стрелки' : kind === 'head' ? 'Перетащить конец стрелки' : 'Изогнуть стрелку'}
     style={{ left: point.x - 3, top: point.y - 3, pointerEvents: 'auto', touchAction: 'none', cursor: 'grab' }}
     onPointerDown={(event) => {
       event.preventDefault(); event.stopPropagation()
       event.currentTarget.setPointerCapture(event.pointerId)
-      onDrag({ kind, arrowId: selectedId!, startClient: { x: event.clientX, y: event.clientY }, pointerId: event.pointerId })
+      onDrag({ kind, arrowId: selectedId!, bendIndex, startClient: { x: event.clientX, y: event.clientY }, pointerId: event.pointerId })
     }} />
   const draw = (id: string, head: Anchor, color: string, interactive: boolean,
+    dash: ArrowDash, shape: ArrowShape,
     geometry: ReturnType<typeof arrowGeometry>) => {
     const { tip, end, path } = geometry
     return <g key={id}>
-      <path d={path} fill="none" stroke={color} strokeWidth={3} strokeLinecap="round" pointerEvents="none" />
+      <path d={path} fill="none" stroke={color} strokeWidth={3} strokeLinecap="round"
+        strokeDasharray={dash === 'long' ? '14 9' : dash === 'short' ? '3 6' : undefined} pointerEvents="none" />
       <path d={`M ${end.x} ${end.y} L ${tip.x} ${tip.y}`} fill="none" stroke="transparent" strokeWidth={3}
-        markerEnd={`url(#board-arrowhead-${color.slice(1)}-${head.side ?? 'free'})`} pointerEvents="none" />
+        markerEnd={`url(#board-arrowhead-${color.slice(1)}-${shape === 'straight' || 'bendHandles' in geometry ? 'free' : head.side ?? 'free'})`} pointerEvents="none" />
       {interactive && <path d={`${path} L ${tip.x} ${tip.y}`} fill="none" stroke="transparent" strokeWidth={16 / view.scale}
         style={{ pointerEvents: 'stroke', cursor: 'pointer' }} onPointerDown={(event) => {
           event.stopPropagation(); onSelect(id)
@@ -418,8 +567,8 @@ export default function ArrowLayer({ arrows, texts, geometries, view, selectedId
         orient={side === 'free' ? 'auto' : side === 'top' ? '90' : side === 'right' ? '180' : side === 'bottom' ? '270' : '0'} markerUnits="strokeWidth">
         <rect width="512" height="512" fill={color} mask="url(#board-arrow-image-mask)" />
       </marker>))}</defs>
-    {arrows.map((arrow) => draw(arrow.id, arrow.head, arrow.color, true, geometries.get(arrow.id)!))}
-    {preview && draw('preview', preview.head, '#272727', false,
+    {arrows.map((arrow) => draw(arrow.id, arrow.head, arrow.color, true, arrow.dash ?? 'solid', arrow.shape ?? 'curved', geometries.get(arrow.id)!))}
+    {preview && draw('preview', preview.head, '#272727', false, 'solid', 'curved',
       arrowGeometry(preview.tail, preview.head,
         initialBend(resolveArrowHead(preview.tail, texts), resolveArrowShaftEnd(preview.tail, preview.head, texts), preview.tail.side, preview.head.side),
         texts, false, undefined, false))}
@@ -428,6 +577,10 @@ export default function ArrowLayer({ arrows, texts, geometries, view, selectedId
     transform: `translate(${view.x}px, ${view.y}px) scale(${view.scale})` }}>
     {handle(selectedGeometry.start, 'tail')}
     {handle(selectedGeometry.tip, 'head')}
-    {handle(selectedGeometry.handle, 'bend')}
+    {arrows.find((arrow) => arrow.id === selectedId)?.shape === 'straight'
+      ? selectedBendHandles?.map((point, index) => handle(point, 'bend', selectedBendHandles.length === 1 ? 1 : index))
+      : arrows.find((arrow) => arrow.id === selectedId)?.shape !== 'elbow'
+        ? handle(selectedGeometry.handle, 'bend', 1)
+        : null}
   </div>}</>
 }

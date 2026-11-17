@@ -119,6 +119,24 @@ function withoutInlineTextColors(html: string) {
   return container.innerHTML
 }
 
+function moveArrowBend(arrow: Arrow, point: Point, index = 1, texts: TextItem[], finish = false): Arrow {
+  if (arrow.shape === 'straight') {
+    if (!arrow.curveBends && !finish) return { ...arrow, pendingStraightBend: point }
+    const start = resolveArrowHead(arrow.tail, texts)
+    const end = arrowGeometry(arrow.tail, arrow.head, arrow.bend, texts, false, undefined, false,
+      'straight', undefined, arrow.pendingStraightBend).end
+    const center = arrow.pendingStraightBend ?? arrowGeometry(arrow.tail, arrow.head, arrow.bend, texts, false, undefined, false, 'straight').handle
+    const bends: [Point, Point, Point] = arrow.curveBends
+      ? [...arrow.curveBends]
+      : [{ x: (start.x + center.x) / 2, y: (start.y + center.y) / 2 }, center,
+        { x: (center.x + end.x) / 2, y: (center.y + end.y) / 2 }]
+    bends[index] = point
+    return { ...arrow, curveBends: bends, pendingStraightBend: undefined }
+  }
+  return { ...arrow, curveBends: undefined, bend: point,
+    bendOffset: bendOffsetFor(arrow.tail, arrow.head, point, texts), bendEdited: true }
+}
+
 export default function BoardCanvas() {
   const boardRef = useRef<HTMLElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -176,10 +194,11 @@ export default function BoardCanvas() {
       const avoidObstacles = draggingArrowId !== arrow.id
       const sameShape = cached?.arrow.tail === arrow.tail && cached.arrow.head === arrow.head
         && cached.arrow.bend === arrow.bend && cached.arrow.bendOffset === arrow.bendOffset
-        && cached.arrow.bendEdited === arrow.bendEdited
+        && cached.arrow.bendEdited === arrow.bendEdited && cached.arrow.shape === arrow.shape
+        && cached.arrow.curveBends === arrow.curveBends && cached.arrow.pendingStraightBend === arrow.pendingStraightBend
       const geometry = sameShape && cached?.textKey === geometryTextKey && cached.avoidObstacles === avoidObstacles
         ? cached.geometry
-        : arrowGeometry(arrow.tail, arrow.head, arrow.bend, texts, arrow.bendEdited, arrow.bendOffset, avoidObstacles)
+        : arrowGeometry(arrow.tail, arrow.head, arrow.bend, texts, arrow.bendEdited, arrow.bendOffset, avoidObstacles, arrow.shape, arrow.curveBends, arrow.pendingStraightBend)
       next.set(arrow.id, { arrow, textKey: geometryTextKey, avoidObstacles, geometry })
       geometries.set(arrow.id, geometry)
     }
@@ -226,7 +245,7 @@ export default function BoardCanvas() {
       if (arrowDrag.kind !== 'bend') setSnapAnchor(snap)
       if (arrowDrag.kind === 'bend' && arrowDrag.arrowId) {
         setArrows((current) => current.map((arrow) => arrow.id === arrowDrag.arrowId
-          ? { ...arrow, bend: point, bendOffset: bendOffsetFor(arrow.tail, arrow.head, point, textsRef.current), bendEdited: true }
+          ? moveArrowBend(arrow, point, arrowDrag.bendIndex, textsRef.current)
           : arrow))
       } else if (arrowDrag.kind !== 'new' && arrowDrag.arrowId) {
         const endpoint = target
@@ -295,7 +314,7 @@ export default function BoardCanvas() {
         }
       } else if (arrowDrag.kind === 'bend' && arrowDrag.arrowId) {
         setArrows((current) => current.map((arrow) => arrow.id === arrowDrag.arrowId
-          ? { ...arrow, bend: point, bendOffset: bendOffsetFor(arrow.tail, arrow.head, point, textsRef.current), bendEdited: true }
+          ? moveArrowBend(arrow, point, arrowDrag.bendIndex, textsRef.current, true)
           : arrow))
       } else if (arrowDrag.arrowId) {
         const endpoint = target
@@ -1027,9 +1046,12 @@ export default function BoardCanvas() {
         onSelect={(id) => { setSelectedArrowId(id); setSelectedId(null); setMultiSelectedIds([]); setEditingId(null) }}
         onDrag={setArrowDrag} />}
       {viewState && selectedArrow && navigationMode === 'cursor' && <ArrowToolbar color={selectedArrow.color}
+        shape={selectedArrow.shape ?? 'curved'} dash={selectedArrow.dash ?? 'solid'}
         left={viewState.x + (selectedArrowHandle?.x ?? selectedArrow.bend.x) * viewState.scale}
         top={Math.max(12, viewState.y + (selectedArrowHandle?.y ?? selectedArrow.bend.y) * viewState.scale - 72)}
         onColor={(color) => setArrows((current) => current.map((arrow) => arrow.id === selectedArrow.id ? { ...arrow, color } : arrow))}
+        onShape={(shape) => setArrows((current) => current.map((arrow) => arrow.id === selectedArrow.id ? { ...arrow, shape } : arrow))}
+        onDash={(dash) => setArrows((current) => current.map((arrow) => arrow.id === selectedArrow.id ? { ...arrow, dash } : arrow))}
         onDelete={() => { setArrows((current) => current.filter((arrow) => arrow.id !== selectedArrow.id)); setSelectedArrowId(null) }} />}
       {viewState && navigationMode === 'cursor' && selectedTexts.length > 1 && <GroupSelection items={selectedTexts} view={viewState}
         minY={visible.top} maxY={visible.bottom}
