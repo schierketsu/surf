@@ -59,6 +59,7 @@ export default function GroupSelection({ items, view, minY, maxY, onMove, onScal
     width: (bounds.right - bounds.left) * view.scale,
     height: (bounds.bottom - bounds.top) * view.scale,
   }
+  const handleScale = view.scale * items.reduce((sum, item) => sum + item.fontSize / MIN_FONT_SIZE, 0) / items.length
 
   const startMove = (event: React.PointerEvent<HTMLButtonElement>) => {
     event.preventDefault()
@@ -143,7 +144,8 @@ export default function GroupSelection({ items, view, minY, maxY, onMove, onScal
     <button type="button" className="group-selection__move-area" style={screenBounds}
       aria-label="Переместить выделенные объекты" title="Перетащить выделенную группу"
       onPointerDown={startMove} onPointerMove={continueMove} onPointerUp={endMove} onPointerCancel={endMove} />
-    <div className="group-selection" style={screenBounds}>
+    <div className="group-selection" style={{ ...screenBounds, '--selection-handle-scale': handleScale,
+      '--connector-scale': view.scale * Math.sqrt(handleScale / view.scale) } as React.CSSProperties}>
       {EDGES.map(({ edge, label }) => <button key={edge} type="button"
         className={`group-selection__drag-area group-selection__drag-area--${edge}`}
         aria-label={`Масштабировать выделенные тексты: ${label} граница`}
@@ -152,6 +154,7 @@ export default function GroupSelection({ items, view, minY, maxY, onMove, onScal
         onPointerMove={continueScale}
         onPointerUp={endScale}
         onPointerCancel={endScale} />)}
+      {EDGES.map(({ edge }) => <span key={edge} className={`group-selection__midpoint group-selection__midpoint--${edge}`} aria-hidden="true" />)}
       {CORNERS.map(({ corner, label }) => <button key={corner} type="button"
         className={`group-selection__handle group-selection__handle--${corner}`}
         aria-label={`Масштабировать выделенные тексты: ${label} угол`}

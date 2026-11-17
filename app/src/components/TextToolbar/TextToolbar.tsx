@@ -17,13 +17,13 @@ type ActiveFormats = Record<FormatCommand, boolean>
 
 const EMPTY_FORMATS: ActiveFormats = { bold: false, italic: false, underline: false, strikeThrough: false }
 
-const FONT_SIZES = [12, 14, 16, 18, 20, 24, 28, 30, 32, 36, 40, 48, 56, 64, 72, 96]
+const FONT_SIZES = [10, 12, 14, 18, 24, 36, 48, 64, 96]
 const FONTS = [
   { label: 'Doska', value: "'Doska', Arial, sans-serif" },
   { label: 'Monospace', value: 'monospace' },
 ]
 const ALIGN_ICONS = { left: alignLeftIcon, center: alignCenterIcon, right: alignRightIcon }
-const TEXT_COLORS = [
+export const TEXT_COLORS = [
   { name: 'Синий', value: '#0057FF' }, { name: 'Зелёный', value: '#00C853' },
   { name: 'Фиолетовый', value: '#7C3AED' }, { name: 'Жёлтый', value: '#FFC400' },
   { name: 'Розовый', value: '#FF3366' }, { name: 'Оранжевый', value: '#FF6D00' },
@@ -87,12 +87,15 @@ type TextToolbarProps = {
   onChange: (changes: Partial<TextItem>) => void
   onFormat: (command: string) => void
   onColor: (color: string) => void
+  onCopy: () => void
   onDelete: () => void
 }
 
-export default function TextToolbar({ item, items, centerX, top, activeFormatsOverride, onChange, onFormat, onColor, onDelete }: TextToolbarProps) {
+export default function TextToolbar({ item, items, centerX, top, activeFormatsOverride, onChange, onFormat, onColor, onCopy, onDelete }: TextToolbarProps) {
   const toolbarRef = useRef<HTMLDivElement>(null)
   const [menu, setMenu] = useState<Menu>(null)
+  const [sizeInput, setSizeInput] = useState(String(Math.round(item.fontSize)))
+  const [editingSize, setEditingSize] = useState(false)
   const [toolbarWidth, setToolbarWidth] = useState(0)
   const [activeFormats, setActiveFormats] = useState<ActiveFormats>(EMPTY_FORMATS)
   const [inlineColor, setInlineColor] = useState<string | null>(null)
@@ -100,7 +103,18 @@ export default function TextToolbar({ item, items, centerX, top, activeFormatsOv
   const background = parseBackground(item.highlight)
   const lastBackgroundColor = useRef(background.color ?? '#FFC400')
   const toggleMenu = (next: Menu) => setMenu((current) => current === next ? null : next)
-  const setSize = (size: number) => onChange({ fontSize: Math.max(MIN_FONT_SIZE, Math.min(MAX_FONT_SIZE, size)) })
+  const setSize = (size: number) => {
+    const bounded = Math.max(MIN_FONT_SIZE, Math.min(MAX_FONT_SIZE, size))
+    setSizeInput(String(bounded))
+    onChange({ fontSize: bounded })
+  }
+  const applySizeInput = () => {
+    if (!sizeInput.trim()) return
+    const size = Number(sizeInput)
+    if (!Number.isFinite(size)) return
+    setSize(Math.round(size))
+    setMenu(null)
+  }
   const fontName = FONTS.find((font) => font.value === item.fontFamily)?.label ?? 'Doska'
   const fontSizeLabel = Math.round(item.fontSize)
   const displayedFormats = activeFormatsOverride ?? {
@@ -184,7 +198,7 @@ export default function TextToolbar({ item, items, centerX, top, activeFormatsOv
       role="toolbar"
       aria-label="Форматирование текста"
       onPointerDown={(event) => {
-        event.preventDefault()
+        if (!(event.target instanceof HTMLInputElement)) event.preventDefault()
         event.stopPropagation()
       }}
     >
@@ -204,10 +218,18 @@ export default function TextToolbar({ item, items, centerX, top, activeFormatsOv
         <span className="text-toolbar__divider" />
 
         <div className="text-toolbar__control text-toolbar__control--size">
-          <button className="text-toolbar__size-value" type="button" aria-label="Размер шрифта" aria-expanded={menu === 'size'}
-            onClick={() => toggleMenu('size')}>
-            {fontSizeLabel}
-          </button>
+          <input className="text-toolbar__size-value" type="number" min={MIN_FONT_SIZE} max={MAX_FONT_SIZE} step="1"
+            value={editingSize ? sizeInput : String(fontSizeLabel)} aria-label="Размер шрифта" aria-expanded={menu === 'size'}
+            onFocus={() => { setSizeInput(String(fontSizeLabel)); setEditingSize(true); setMenu('size') }}
+            onClick={() => setMenu('size')}
+            onChange={(event) => setSizeInput(event.target.value)}
+            onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); applySizeInput(); event.currentTarget.blur() } }}
+            onBlur={() => {
+              const size = Number(sizeInput)
+              if (sizeInput.trim() && Number.isFinite(size)) setSize(Math.round(size))
+              else setSizeInput(String(fontSizeLabel))
+              setEditingSize(false)
+            }} />
           <div className="text-toolbar__size-steps">
             <button type="button" aria-label="Увеличить размер текста" disabled={item.fontSize >= MAX_FONT_SIZE}
               onClick={() => setSize(fontSizeLabel + 1)}><span className="text-toolbar__arrow text-toolbar__arrow--up" /></button>
@@ -300,6 +322,9 @@ export default function TextToolbar({ item, items, centerX, top, activeFormatsOv
           <button className="text-toolbar__icon-button" type="button" aria-label="Дополнительные действия" aria-expanded={menu === 'more'}
             onClick={() => toggleMenu('more')}><img className="text-toolbar__asset-icon text-toolbar__asset-icon--more" src={moreIcon} alt="" aria-hidden="true" /></button>
           {menu === 'more' && <div className="text-toolbar__popover text-toolbar__popover--more" role="group" aria-label="Дополнительные действия">
+            <button className="text-toolbar__menu-item" type="button" onClick={() => { onCopy(); setMenu(null) }}>
+              <span>Копировать</span><span className="text-toolbar__shortcut">Ctrl+C</span>
+            </button>
             <button className="text-toolbar__menu-item" type="button" onClick={onDelete}>
               <span>Удалить</span><span className="text-toolbar__shortcut">Delete</span>
             </button>

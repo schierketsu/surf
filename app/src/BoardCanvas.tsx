@@ -1,10 +1,13 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import ToolPanel, { type NavigationMode } from './components/ToolPanel/ToolPanel'
 import ZoomControls from './components/ZoomControls/ZoomControls'
 import TextBox, { MAX_FONT_SIZE, MIN_FONT_SIZE, MIN_TEXT_HEIGHT, MIN_TEXT_WIDTH, type TextItem } from './components/TextBox/TextBox'
 import GroupSelection from './components/GroupSelection/GroupSelection'
 import TextToolbar from './components/TextToolbar/TextToolbar'
 import { BOARD_HEIGHT, BOARD_WIDTH, MINI_CELLS_PER_SIDE, gridLevelForScale, visitVisibleCells, type WorldRect } from './gridHierarchy'
+import ArrowLayer, { anchorPoint, arrowGeometry, arrowTarget, bendOffsetFor, initialBend, resolveArrowHead, resolveArrowShaftEnd, type Anchor, type Arrow, type ArrowDrag, type Point } from './ArrowLayer'
+import ArrowToolbar from './components/ArrowToolbar/ArrowToolbar'
+import type { ConnectorSide } from './components/TextBox/TextBox'
 
 type View = { scale: number; x: number; y: number }
 type SelectionRect = { left: number; top: number; width: number; height: number }
@@ -13,8 +16,30 @@ type FormatCommand = 'bold' | 'italic' | 'underline' | 'strikeThrough'
 const MAX_SCALE = 4
 const WHEEL_ZOOM_SENSITIVITY = 0.002
 const INITIAL_TEXT_WIDTH = 180
-const INITIAL_TEXT_HEIGHT = 40
+const INITIAL_TEXT_HEIGHT = 24
 const VISIBLE_EDGE_GAP = 8
+const ARROW_DRAG_THRESHOLD = 6
+const OBJECT_CLIPBOARD_TYPE = 'application/x-doska-objects+json'
+const OBJECT_CLIPBOARD_PREFIX = 'DOSKA_OBJECTS_V1:'
+
+type ObjectClipboard = { version: 1; texts: TextItem[]; arrows: Arrow[] }
+
+function occupiedConnectorKeys(items: Arrow[], exceptArrowId?: string) {
+  const occupied = new Set<string>()
+  for (const arrow of items) {
+    if (arrow.id === exceptArrowId) continue
+    if (arrow.tail.textId && arrow.tail.side) occupied.add(`${arrow.tail.textId}:${arrow.tail.side}`)
+    if (arrow.head.textId && arrow.head.side) occupied.add(`${arrow.head.textId}:${arrow.head.side}`)
+  }
+  return occupied
+}
+
+function parseObjectClipboard(value: string): ObjectClipboard | null {
+  try {
+    const data = JSON.parse(value.startsWith(OBJECT_CLIPBOARD_PREFIX) ? value.slice(OBJECT_CLIPBOARD_PREFIX.length) : value)
+    return data?.version === 1 && Array.isArray(data.texts) && Array.isArray(data.arrows) ? data as ObjectClipboard : null
+  } catch { return null }
+}
 
 function visibleVerticalBounds(view: View | null, viewportHeight: number) {
   if (!view || !viewportHeight) return { top: 0, bottom: BOARD_HEIGHT }
@@ -105,8 +130,18 @@ export default function BoardCanvas() {
   const textModeRef = useRef(false)
   const navigationModeRef = useRef<NavigationMode>('cursor')
   const textsRef = useRef<TextItem[]>([])
+  const arrowsRef = useRef<Arrow[]>([])
+  const arrowDragRef = useRef<ArrowDrag | null>(null)
+  const selectedIdRef = useRef<string | null>(null)
   const editorRefs = useRef(new Map<string, HTMLDivElement>())
   const selectionRef = useRef<Range | null>(null)
+  const pasteCountRef = useRef(0)
+  const arrowGeometryCacheRef = useRef(new Map<string, {
+    arrow: Arrow
+    textKey: string
+    avoidObstacles: boolean
+    geometry: ReturnType<typeof arrowGeometry>
+  }>())
   const [zoomLimits, setZoomLimits] = useState({ atMin: false, atMax: false })
   const [viewState, setViewState] = useState<View | null>(null)
   const [texts, setTexts] = useState<TextItem[]>([])
@@ -117,8 +152,196 @@ export default function BoardCanvas() {
   const [navigationMode, setNavigationMode] = useState<NavigationMode>('cursor')
   const [resetToCursorToken, setResetToCursorToken] = useState(0)
   const [selectionRect, setSelectionRect] = useState<SelectionRect | null>(null)
+  const [arrows, setArrows] = useState<Arrow[]>([])
+  const [selectedArrowId, setSelectedArrowId] = useState<string | null>(null)
+  const [arrowDrag, setArrowDrag] = useState<ArrowDrag | null>(null)
+  const [arrowPointer, setArrowPointer] = useState<Point | null>(null)
+  const [snapAnchor, setSnapAnchor] = useState<Anchor | null>(null)
 
   textsRef.current = texts
+  arrowsRef.current = arrows
+  arrowDragRef.current = arrowDrag
+  selectedIdRef.current = selectedId
+
+  const geometryTextKey = JSON.stringify(texts.map(({ id, x, y, width, height, fontSize }) =>
+    [id, x, y, width, height, fontSize]))
+  const draggingArrowId = arrowDrag?.active ? arrowDrag.arrowId : null
+  const arrowGeometries = useMemo(() => {
+    const previous = arrowGeometryCacheRef.current
+    const next = new Map<string, { arrow: Arrow; textKey: string; avoidObstacles: boolean;
+      geometry: ReturnType<typeof arrowGeometry> }>()
+    const geometries = new Map<string, ReturnType<typeof arrowGeometry>>()
+    for (const arrow of arrows) {
+      const cached = previous.get(arrow.id)
+      const avoidObstacles = draggingArrowId !== arrow.id
+      const sameShape = cached?.arrow.tail === arrow.tail && cached.arrow.head === arrow.head
+        && cached.arrow.bend === arrow.bend && cached.arrow.bendOffset === arrow.bendOffset
+        && cached.arrow.bendEdited === arrow.bendEdited
+      const geometry = sameShape && cached?.textKey === geometryTextKey && cached.avoidObstacles === avoidObstacles
+        ? cached.geometry
+        : arrowGeometry(arrow.tail, arrow.head, arrow.bend, texts, arrow.bendEdited, arrow.bendOffset, avoidObstacles)
+      next.set(arrow.id, { arrow, textKey: geometryTextKey, avoidObstacles, geometry })
+      geometries.set(arrow.id, geometry)
+    }
+    arrowGeometryCacheRef.current = next
+    return geometries
+  }, [arrows, geometryTextKey, draggingArrowId])
+
+  useEffect(() => {
+    const activeIds = new Set([...multiSelectedIds, selectedId, editingId])
+    for (const arrow of arrows) {
+      if (arrow.tail.textId) activeIds.add(arrow.tail.textId)
+      if (arrow.head.textId) activeIds.add(arrow.head.textId)
+    }
+    if (arrowDrag || selectedId) texts.forEach((item) => activeIds.add(item.id))
+    setTexts((current) => {
+      const remaining = current.filter((item) => {
+        if (activeIds.has(item.id)) return true
+        const editorText = editorRefs.current.get(item.id)?.textContent
+        if (editorText !== undefined) return Boolean(editorText.trim())
+        const savedText = document.createElement('div')
+        savedText.innerHTML = item.html
+        return Boolean(savedText.textContent?.trim())
+      })
+      return remaining.length === current.length ? current : remaining
+    })
+  }, [selectedId, editingId, multiSelectedIds, arrows, arrowDrag])
+
+  useEffect(() => {
+    if (!arrowDrag) return
+    let moveFrame: number | null = null
+    let latestMove: { x: number; y: number } | null = null
+    let dragActivated = Boolean(arrowDrag.active)
+    const applyMove = (clientX: number, clientY: number) => {
+      const board = boardRef.current
+      const view = viewRef.current
+      if (!board || !view) return
+      const bounds = board.getBoundingClientRect()
+      const point = { x: (clientX - bounds.left - view.x) / view.scale, y: (clientY - bounds.top - view.y) / view.scale }
+      const excluded = arrowDrag.kind === 'new' ? arrowDrag.tail?.textId : undefined
+      const occupied = occupiedConnectorKeys(arrowsRef.current, arrowDrag.arrowId)
+      const target: Anchor = arrowDrag.kind === 'bend' ? point : arrowTarget(point, textsRef.current, view.scale, excluded, occupied)
+      const snap = target.textId ? target : null
+      if (arrowDrag.kind === 'new') setArrowPointer(target)
+      if (arrowDrag.kind !== 'bend') setSnapAnchor(snap)
+      if (arrowDrag.kind === 'bend' && arrowDrag.arrowId) {
+        setArrows((current) => current.map((arrow) => arrow.id === arrowDrag.arrowId
+          ? { ...arrow, bend: point, bendOffset: bendOffsetFor(arrow.tail, arrow.head, point, textsRef.current), bendEdited: true }
+          : arrow))
+      } else if (arrowDrag.kind !== 'new' && arrowDrag.arrowId) {
+        const endpoint = target
+        setArrows((current) => current.map((arrow) => {
+          if (arrow.id !== arrowDrag.arrowId) return arrow
+          const next = { ...arrow, [arrowDrag.kind]: endpoint }
+          return next.bendEdited ? next : { ...next, bend: initialBend(
+            resolveArrowHead(next.tail, textsRef.current), resolveArrowShaftEnd(next.tail, next.head, textsRef.current), next.tail.side, next.head.side) }
+        }))
+      }
+    }
+    const resetEndpointBend = () => {
+      if ((arrowDrag.kind !== 'tail' && arrowDrag.kind !== 'head') || !arrowDrag.arrowId) return
+      setArrows((current) => current.map((arrow) => {
+        if (arrow.id !== arrowDrag.arrowId) return arrow
+        const start = resolveArrowHead(arrow.tail, textsRef.current)
+        const end = resolveArrowShaftEnd(arrow.tail, arrow.head, textsRef.current)
+        return { ...arrow, bend: initialBend(start, end, arrow.tail.side, arrow.head.side),
+          bendEdited: false, bendOffset: undefined }
+      }))
+    }
+    const onMove = (event: PointerEvent) => {
+      if (arrowDrag.pointerId !== undefined && event.pointerId !== arrowDrag.pointerId) return
+      if (!dragActivated) {
+        const start = arrowDrag.startClient
+        if (!start || Math.hypot(event.clientX - start.x, event.clientY - start.y) < ARROW_DRAG_THRESHOLD) return
+        dragActivated = true
+        resetEndpointBend()
+        setArrowDrag({ ...arrowDrag, active: true })
+        applyMove(event.clientX, event.clientY)
+        return
+      }
+      latestMove = { x: event.clientX, y: event.clientY }
+      if (moveFrame !== null) return
+      moveFrame = window.requestAnimationFrame(() => {
+        moveFrame = null
+        if (latestMove) applyMove(latestMove.x, latestMove.y)
+        latestMove = null
+      })
+    }
+    const finish = (clientX: number, clientY: number) => {
+      if (moveFrame !== null) window.cancelAnimationFrame(moveFrame)
+      moveFrame = null
+      latestMove = null
+      const board = boardRef.current
+      const view = viewRef.current
+      if (!board || !view) { setArrowDrag(null); return }
+      const bounds = board.getBoundingClientRect()
+      const point = { x: (clientX - bounds.left - view.x) / view.scale, y: (clientY - bounds.top - view.y) / view.scale }
+      const occupied = occupiedConnectorKeys(arrowsRef.current, arrowDrag.arrowId)
+      const target: Anchor = arrowDrag.kind === 'bend' ? point : arrowTarget(point, textsRef.current, view.scale,
+        arrowDrag.kind === 'new' ? arrowDrag.tail?.textId : undefined, occupied)
+      if (arrowDrag.kind === 'new' && arrowDrag.tail) {
+        const tail = arrowDrag.tail
+        const head: Anchor = target
+        const start = resolveArrowHead(tail, textsRef.current)
+        if (Math.hypot(start.x - head.x, start.y - head.y) > 6) {
+          const id = crypto.randomUUID()
+          const target = resolveArrowShaftEnd(tail, head, textsRef.current)
+          setArrows((current) => [...current, { id, tail, head,
+            bend: initialBend(start, target, tail.side, head.side), color: '#272727' }])
+          setSelectedArrowId(id)
+          setSelectedId(null)
+          setMultiSelectedIds([])
+          setEditingId(null)
+        }
+      } else if (arrowDrag.kind === 'bend' && arrowDrag.arrowId) {
+        setArrows((current) => current.map((arrow) => arrow.id === arrowDrag.arrowId
+          ? { ...arrow, bend: point, bendOffset: bendOffsetFor(arrow.tail, arrow.head, point, textsRef.current), bendEdited: true }
+          : arrow))
+      } else if (arrowDrag.arrowId) {
+        const endpoint = target
+        setArrows((current) => current.map((arrow) => {
+          if (arrow.id !== arrowDrag.arrowId) return arrow
+          const next = { ...arrow, [arrowDrag.kind]: endpoint }
+          return next.bendEdited ? next : { ...next, bend: initialBend(
+            resolveArrowHead(next.tail, textsRef.current), resolveArrowShaftEnd(next.tail, next.head, textsRef.current), next.tail.side, next.head.side) }
+        }))
+      }
+      setArrowDrag(null)
+      setArrowPointer(null)
+      setSnapAnchor(null)
+    }
+    const onUp = (event: PointerEvent) => {
+      if (arrowDrag.pointerId !== undefined && event.pointerId !== arrowDrag.pointerId) return
+      const start = arrowDrag.startClient
+      if (!dragActivated && (!start
+        || Math.hypot(event.clientX - start.x, event.clientY - start.y) < ARROW_DRAG_THRESHOLD)) {
+        if (moveFrame !== null) window.cancelAnimationFrame(moveFrame)
+        moveFrame = null
+        latestMove = null
+        setArrowDrag(null)
+        return
+      }
+      if (!dragActivated) resetEndpointBend()
+      finish(event.clientX, event.clientY)
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+    return () => {
+      if (moveFrame !== null) window.cancelAnimationFrame(moveFrame)
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+    }
+  }, [arrowDrag])
+
+  const startArrow = (id: string, side: ConnectorSide, startClient: Point, pointerId: number) => {
+    if (arrowDrag) return
+    if (occupiedConnectorKeys(arrows).has(`${id}:${side}`)) return
+    const item = textsRef.current.find((text) => text.id === id)
+    if (!item) return
+    const point = anchorPoint(item, side)
+    const tail: Anchor = { ...point, textId: id, side }
+    setArrowDrag({ kind: 'new', tail, startClient, pointerId })
+  }
   const viewportHeight = () => boardRef.current?.clientHeight ?? 0
 
   const changeText = (id: string, changes: Partial<TextItem>) => {
@@ -180,6 +403,7 @@ export default function BoardCanvas() {
   }
 
   const selectText = (id: string) => {
+    setSelectedArrowId(null)
     if (selectedId !== id) {
       const previousEditor = selectedId ? editorRefs.current.get(selectedId) : null
       if (previousEditor && document.activeElement === previousEditor) previousEditor.blur()
@@ -203,13 +427,18 @@ export default function BoardCanvas() {
 
   const commitText = (id: string, html: string, isEmpty: boolean) => {
     if (isEmpty) {
-      clearTextSelection()
-      setTexts((current) => current.filter((item) => item.id !== id))
-      setSelectedId((current) => current === id ? null : current)
-      setMultiSelectedIds((current) => current.filter((selected) => selected !== id))
       setEditingId((current) => current === id ? null : current)
       setFocusId((current) => current === id ? null : current)
-      editorRefs.current.delete(id)
+      requestAnimationFrame(() => {
+        if (arrowDragRef.current || (selectedIdRef.current && selectedIdRef.current !== id)
+          || arrowsRef.current.some((arrow) => arrow.tail.textId === id || arrow.head.textId === id)
+          || editorRefs.current.get(id)?.textContent?.trim()) return
+        clearTextSelection()
+        setTexts((current) => current.filter((item) => item.id !== id))
+        setSelectedId((current) => current === id ? null : current)
+        setMultiSelectedIds((current) => current.filter((selected) => selected !== id))
+        editorRefs.current.delete(id)
+      })
     } else {
       changeText(id, { html })
     }
@@ -295,6 +524,8 @@ export default function BoardCanvas() {
     if (!ids.length) return
     const deletedIds = new Set(ids)
     setTexts((current) => current.filter((item) => !deletedIds.has(item.id)))
+    setArrows((current) => current.filter((arrow) =>
+      !deletedIds.has(arrow.tail.textId ?? '') && !deletedIds.has(arrow.head.textId ?? '')))
     setSelectedId(null)
     setMultiSelectedIds([])
     setEditingId(null)
@@ -302,6 +533,84 @@ export default function BoardCanvas() {
     selectionRef.current = null
     window.getSelection()?.removeAllRanges()
   }
+
+  const selectedObjectClipboard = (): ObjectClipboard | null => {
+    if (selectedArrowId) return null
+    const ids = new Set(multiSelectedIds.length ? multiSelectedIds : selectedId ? [selectedId] : [])
+    if (!ids.size) return null
+    return {
+      version: 1,
+      texts: texts.filter((item) => ids.has(item.id)).map((item) => ({ ...item, html: editorRefs.current.get(item.id)?.innerHTML ?? item.html })),
+      arrows: [],
+    }
+  }
+
+  const writeObjectClipboard = (payload: ObjectClipboard) => {
+    pasteCountRef.current = 0
+    const json = JSON.stringify(payload)
+    const copy = (event: ClipboardEvent) => {
+      event.preventDefault()
+      event.clipboardData?.setData(OBJECT_CLIPBOARD_TYPE, json)
+      event.clipboardData?.setData('text/plain', OBJECT_CLIPBOARD_PREFIX + json)
+    }
+    document.addEventListener('copy', copy, { capture: true, once: true })
+    const copied = document.execCommand('copy')
+    document.removeEventListener('copy', copy, true)
+    if (!copied) void navigator.clipboard?.writeText(OBJECT_CLIPBOARD_PREFIX + json)
+  }
+
+  const pasteObjects = (payload: ObjectClipboard) => {
+    if (!payload.texts.length) return
+    const view = viewRef.current
+    const offset = 24 * ++pasteCountRef.current / (view?.scale ?? 1)
+    const sourceTexts = payload.texts
+    const points: Point[] = sourceTexts.flatMap((item) => [
+      { x: item.x, y: item.y }, { x: item.x + item.width, y: item.y + item.height },
+    ])
+    const minX = Math.min(...points.map((point) => point.x))
+    const maxX = Math.max(...points.map((point) => point.x))
+    const minY = Math.min(...points.map((point) => point.y))
+    const maxY = Math.max(...points.map((point) => point.y))
+    const dx = Math.max(-minX, Math.min(BOARD_WIDTH - maxX, offset))
+    const dy = Math.max(-minY, Math.min(BOARD_HEIGHT - maxY, offset))
+    const idMap = new Map(sourceTexts.map((item) => [item.id, crypto.randomUUID()]))
+    const newTexts = sourceTexts.map((item) => constrainText({ ...item, id: idMap.get(item.id)!, x: item.x + dx, y: item.y + dy }, view, viewportHeight()))
+    setTexts((current) => [...current, ...newTexts])
+    setEditingId(null)
+    setFocusId(null)
+    setSelectedId(newTexts.length === 1 ? newTexts[0].id : null)
+    setMultiSelectedIds(newTexts.length > 1 ? newTexts.map((item) => item.id) : [])
+    setSelectedArrowId(null)
+  }
+
+  useEffect(() => {
+    const editableTarget = (target: EventTarget | null) => target instanceof HTMLElement
+      && (target.isContentEditable || Boolean(target.closest('input, textarea, select')))
+    const onCopy = (event: ClipboardEvent) => {
+      if (event.defaultPrevented || editableTarget(event.target) || navigationMode !== 'cursor') return
+      if (selectedArrowId) { event.preventDefault(); return }
+      const payload = selectedObjectClipboard()
+      if (!payload) return
+      const json = JSON.stringify(payload)
+      event.preventDefault()
+      event.clipboardData?.setData(OBJECT_CLIPBOARD_TYPE, json)
+      event.clipboardData?.setData('text/plain', OBJECT_CLIPBOARD_PREFIX + json)
+      pasteCountRef.current = 0
+    }
+    const onPaste = (event: ClipboardEvent) => {
+      if (event.defaultPrevented || editableTarget(event.target) || navigationMode !== 'cursor') return
+      const custom = event.clipboardData?.getData(OBJECT_CLIPBOARD_TYPE)
+      const plain = event.clipboardData?.getData('text/plain')
+      const payload = custom ? parseObjectClipboard(custom)
+        : plain?.startsWith(OBJECT_CLIPBOARD_PREFIX) ? parseObjectClipboard(plain) : null
+      if (!payload) return
+      event.preventDefault()
+      pasteObjects(payload)
+    }
+    window.addEventListener('copy', onCopy)
+    window.addEventListener('paste', onPaste)
+    return () => { window.removeEventListener('copy', onCopy); window.removeEventListener('paste', onPaste) }
+  }, [texts, arrows, selectedId, multiSelectedIds, selectedArrowId, navigationMode])
 
   useEffect(() => {
     const ids = multiSelectedIds.length ? multiSelectedIds : selectedId ? [selectedId] : []
@@ -319,6 +628,21 @@ export default function BoardCanvas() {
     window.addEventListener('keydown', onDelete)
     return () => window.removeEventListener('keydown', onDelete)
   }, [selectedId, multiSelectedIds, navigationMode])
+
+  useEffect(() => {
+    if (!selectedArrowId) return
+    const onArrowKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') { setSelectedArrowId(null); return }
+      if (event.key !== 'Delete') return
+      const target = event.target
+      if (target instanceof HTMLElement && (target.isContentEditable || target.closest('input, textarea, select'))) return
+      event.preventDefault()
+      setArrows((current) => current.filter((arrow) => arrow.id !== selectedArrowId))
+      setSelectedArrowId(null)
+    }
+    window.addEventListener('keydown', onArrowKey)
+    return () => window.removeEventListener('keydown', onArrowKey)
+  }, [selectedArrowId])
 
   useLayoutEffect(() => {
     const ids = ensureTextVisibleIdsRef.current
@@ -564,6 +888,7 @@ export default function BoardCanvas() {
       } else {
         document.activeElement instanceof HTMLElement && document.activeElement.blur()
         clearTextSelection()
+        setSelectedArrowId(null)
         setSelectedId(null)
         setMultiSelectedIds([])
         setEditingId(null)
@@ -647,6 +972,9 @@ export default function BoardCanvas() {
     ? texts.filter((item) => multiSelectedIds.includes(item.id))
     : texts.filter((item) => item.id === selectedId)
   const selectedText = selectedTexts[0]
+  const selectedArrow = arrows.find((arrow) => arrow.id === selectedArrowId)
+  const occupiedConnectors = occupiedConnectorKeys(arrows)
+  const selectedArrowHandle = selectedArrow ? arrowGeometries.get(selectedArrow.id)?.handle : null
   const selectedBounds = selectedTexts.length ? {
     left: Math.min(...selectedTexts.map((item) => item.x)),
     top: Math.min(...selectedTexts.map((item) => item.y)),
@@ -655,8 +983,16 @@ export default function BoardCanvas() {
   const toolbarCenterX = selectedBounds && viewState
     ? viewState.x + ((selectedBounds.left + selectedBounds.right) / 2) * viewState.scale
     : 0
+  const handleScale = selectedTexts.length
+    ? selectedTexts.reduce((sum, item) => sum + item.fontSize / MIN_FONT_SIZE, 0) / selectedTexts.length
+    : 1
+  const toolbarOffset = viewState
+    ? selectedTexts.length > 1
+      ? 40 + 24 * Math.sqrt(handleScale) * viewState.scale
+      : 46 + (24 * Math.sqrt(handleScale) - 6) * viewState.scale
+    : 64
   const toolbarTop = selectedBounds && viewState
-    ? Math.max(12, viewState.y + selectedBounds.top * viewState.scale - 59)
+    ? Math.max(12, viewState.y + selectedBounds.top * viewState.scale - toolbarOffset)
     : 12
   const groupFormats = selectedTexts.length > 1 ? {
     bold: selectedTexts.every((item) => Boolean(item.bold)),
@@ -667,7 +1003,7 @@ export default function BoardCanvas() {
   const visible = visibleVerticalBounds(viewState, boardRef.current?.clientHeight ?? 0)
 
   return (
-    <main ref={boardRef} className={`board${navigationMode === 'hand' ? ' board--hand' : ''}`} aria-label="Поле доски 3840 на 2160 пикселей">
+    <main ref={boardRef} className={`board${navigationMode === 'hand' ? ' board--hand' : ' board--cursor'}`} aria-label="Поле доски 3840 на 2160 пикселей">
       <canvas ref={canvasRef} className="board-canvas">
         Поле доски требует поддержки Canvas.
       </canvas>
@@ -678,8 +1014,23 @@ export default function BoardCanvas() {
           scale={viewState.scale} minY={visible.top} maxY={visible.bottom}
           onSelect={selectText} onEdit={editText} onChange={changeTextFromBox} onCommit={commitText}
           onDismiss={() => { clearTextSelection(); setSelectedId(null); setMultiSelectedIds([]); setEditingId(null); setFocusId(null) }} onSaveSelection={saveSelection}
+          showConnectors={arrowDrag !== null && (arrowDrag.kind !== 'bend' && arrowDrag.kind !== 'new' || Boolean(arrowDrag.active))}
+          occupiedSides={(['top', 'right', 'bottom', 'left'] as ConnectorSide[])
+            .filter((side) => occupiedConnectors.has(`${item.id}:${side}`))}
+          snapSide={snapAnchor?.textId === item.id ? snapAnchor.side ?? null : null}
+          onConnectorStart={startArrow}
           onEditorRef={(id, node) => { if (node) editorRefs.current.set(id, node); else editorRefs.current.delete(id) }} />)}
       </div>}
+      {viewState && <ArrowLayer arrows={arrows} texts={texts} geometries={arrowGeometries} view={viewState} selectedId={selectedArrowId}
+        preview={arrowDrag?.kind === 'new' && arrowDrag.active && arrowDrag.tail && arrowPointer
+          ? { tail: arrowDrag.tail, head: snapAnchor ?? arrowPointer } : null}
+        onSelect={(id) => { setSelectedArrowId(id); setSelectedId(null); setMultiSelectedIds([]); setEditingId(null) }}
+        onDrag={setArrowDrag} />}
+      {viewState && selectedArrow && navigationMode === 'cursor' && <ArrowToolbar color={selectedArrow.color}
+        left={viewState.x + (selectedArrowHandle?.x ?? selectedArrow.bend.x) * viewState.scale}
+        top={Math.max(12, viewState.y + (selectedArrowHandle?.y ?? selectedArrow.bend.y) * viewState.scale - 72)}
+        onColor={(color) => setArrows((current) => current.map((arrow) => arrow.id === selectedArrow.id ? { ...arrow, color } : arrow))}
+        onDelete={() => { setArrows((current) => current.filter((arrow) => arrow.id !== selectedArrow.id)); setSelectedArrowId(null) }} />}
       {viewState && navigationMode === 'cursor' && selectedTexts.length > 1 && <GroupSelection items={selectedTexts} view={viewState}
         minY={visible.top} maxY={visible.bottom}
         onMove={(items, dx, dy) => {
@@ -691,7 +1042,9 @@ export default function BoardCanvas() {
       {selectedText && viewState && navigationMode === 'cursor' && <TextToolbar key={multiSelectedIds.length ? multiSelectedIds.join(':') : selectedText.id}
         item={selectedText} items={selectedTexts} centerX={toolbarCenterX} top={toolbarTop} activeFormatsOverride={groupFormats}
         onChange={(changes) => multiSelectedIds.length ? changeSelectedTexts(changes) : changeText(selectedText.id, changes)}
-        onFormat={formatText} onColor={setTextColor} onDelete={deleteSelectedTexts} />}
+        onFormat={formatText} onColor={setTextColor}
+        onCopy={() => { const payload = selectedObjectClipboard(); if (payload) writeObjectClipboard(payload) }}
+        onDelete={deleteSelectedTexts} />}
       <ToolPanel resetToCursorToken={resetToCursorToken} onNavigationModeChange={(mode) => {
         navigationModeRef.current = mode
         setNavigationMode(mode)

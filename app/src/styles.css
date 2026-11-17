@@ -53,6 +53,11 @@ button {
   font: inherit;
 }
 
+:root:has(.board--cursor),
+:root:has(.board--cursor) * {
+  cursor: url('/cursor.svg') 6 3, auto !important;
+}
+
 h1,
 h2,
 h3,
@@ -110,6 +115,27 @@ h6 {
   overflow: clip;
   pointer-events: none;
 }
+
+.board-arrows {
+  position: absolute;
+  z-index: 2;
+  top: 0;
+  left: 0;
+  overflow: visible;
+  pointer-events: none;
+  transform-origin: 0 0;
+}
+
+.board-arrow-handles {
+  position: absolute;
+  z-index: 3;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+  transform-origin: 0 0;
+}
+
+.board-arrow-handle--bend:hover { transform: scale(1.5); }
 
 .board--hand .text-box,
 .board--hand .text-box * {

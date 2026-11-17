@@ -141,8 +141,8 @@
 }
 
 .tool-panel__icon--highlighter {
-  mask-image: url('./icons/highlighter.png');
-  -webkit-mask-image: url('./icons/highlighter.png');
+  mask-image: url('./icons/brush.png');
+  -webkit-mask-image: url('./icons/brush.png');
 }
 
 .tool-panel__icon--text {
