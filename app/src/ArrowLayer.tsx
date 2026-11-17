@@ -243,7 +243,14 @@ function visibleRoute(from: Point, to: Point, boxes: Hitbox[]): Point[] | null {
   return route.reverse()
 }
 
-function orthogonalRoute(from: Point, to: Point, boxes: Hitbox[]): Point[] | null {
+function validArrival(points: Point[], outward?: Point | null) {
+  if (!outward) return true
+  const last = points[points.length - 1]
+  const before = [...points.slice(0, -1)].reverse().find((point) => point.x !== last.x || point.y !== last.y)
+  return !before || (last.x - before.x) * outward.x + (last.y - before.y) * outward.y <= 0
+}
+
+function orthogonalRoute(from: Point, to: Point, boxes: Hitbox[], outward?: Point | null): Point[] | null {
   const xs = [...new Set([from.x, to.x, (from.x + to.x) / 2, 0, BOARD_WIDTH,
     ...boxes.flatMap((box) => [box.left, box.right])])].filter((x) => x >= 0 && x <= BOARD_WIDTH).sort((a, b) => a - b)
   const ys = [...new Set([from.y, to.y, (from.y + to.y) / 2, 0, BOARD_HEIGHT,
@@ -274,6 +281,7 @@ function orthogonalRoute(from: Point, to: Point, boxes: Hitbox[]): Point[] | nul
     ]) {
       if (neighbor < 0) continue
       const next = neighbor * 2 + axis
+      if (neighbor === finish && !validArrival([nodes[node].point, nodes[neighbor].point], outward)) continue
       if (visited[next] || boxes.some((box) => inside(nodes[neighbor].point, box)
         || crosses(nodes[node].point, nodes[neighbor].point, box))) continue
       const a = nodes[node].point
@@ -292,12 +300,13 @@ function orthogonalRoute(from: Point, to: Point, boxes: Hitbox[]): Point[] | nul
 }
 
 function centeredOrthogonalRoute(from: Point, to: Point, boxes: Hitbox[], horizontalFirst: boolean,
-  horizontalLast: boolean): Point[] | null {
+  horizontalLast: boolean, outward?: Point | null): Point[] | null {
   const midpoint = horizontalFirst === horizontalLast
     ? horizontalFirst ? (from.x + to.x) / 2 : (from.y + to.y) / 2
     : 0
   const coordinates = horizontalFirst === horizontalLast
-    ? [midpoint, ...boxes.flatMap((box) => horizontalFirst ? [box.left, box.right] : [box.top, box.bottom])]
+    ? [midpoint, horizontalFirst ? from.x : from.y, horizontalFirst ? to.x : to.y,
+      ...boxes.flatMap((box) => horizontalFirst ? [box.left, box.right] : [box.top, box.bottom])]
       .sort((a, b) => Math.abs(a - midpoint) - Math.abs(b - midpoint))
     : [0]
   for (const coordinate of coordinates) {
@@ -307,6 +316,7 @@ function centeredOrthogonalRoute(from: Point, to: Point, boxes: Hitbox[], horizo
         : [{ x: from.x, y: coordinate }, { x: to.x, y: coordinate }]
       : horizontalFirst ? [{ x: to.x, y: from.y }] : [{ x: from.x, y: to.y }]
     const points = [from, ...corners, to]
+    if (!validArrival(points, outward)) continue
     if (points.some((point) => point.x < 0 || point.x > BOARD_WIDTH || point.y < 0 || point.y > BOARD_HEIGHT)) continue
     if (points.slice(1).some((point, index) => boxes.some((box) => inside(point, box)
       || crosses(points[index], point, box)))) continue
@@ -383,25 +393,6 @@ export function arrowGeometry(tail: Anchor, head: Anchor, bend: Point, texts: Te
     return { start, tip, end: straightEnd,
       path: `M ${start.x} ${start.y} L ${straightEnd.x} ${straightEnd.y}`, handle: center, bendHandles: [center] }
   }
-  if (shape === 'curved' && curveBends) {
-    const last = curveBends[2]
-    const dx = tip.x - last.x
-    const dy = tip.y - last.y
-    const length = Math.hypot(dx, dy) || 1
-    const curveEnd = { x: tip.x - dx / length * 16, y: tip.y - dy / length * 16 }
-    const points = [start, ...curveBends, curveEnd]
-    let path = `M ${start.x} ${start.y}`
-    for (let i = 0; i < points.length - 1; i++) {
-      const before = points[Math.max(0, i - 1)]
-      const from = points[i]
-      const to = points[i + 1]
-      const after = points[Math.min(points.length - 1, i + 2)]
-      const first = { x: from.x + (to.x - before.x) / 6, y: from.y + (to.y - before.y) / 6 }
-      const second = { x: to.x - (after.x - from.x) / 6, y: to.y - (after.y - from.y) / 6 }
-      path += ` C ${first.x} ${first.y} ${second.x} ${second.y} ${to.x} ${to.y}`
-    }
-    return { start, tip, end: curveEnd, path, handle: curveBends[1], bendHandles: curveBends }
-  }
   if (shape === 'elbow') {
     const horizontalFirst = tail.side === 'left' || tail.side === 'right' ||
       (!tail.side && Math.abs(end.x - start.x) >= Math.abs(end.y - start.y))
@@ -412,13 +403,14 @@ export function arrowGeometry(tail: Anchor, head: Anchor, bend: Point, texts: Te
         const departure = tail.side ? sideDirection(tail.side, { x: 0, y: 0 }) : null
         const arrival = head.side ? sideDirection(head.side, { x: 0, y: 0 }) : null
         const from = departure ? { x: start.x + departure.x * (padding + 4), y: start.y + departure.y * (padding + 4) } : start
-        const to = arrival ? { x: tip.x + arrival.x * (padding + 4), y: tip.y + arrival.y * (padding + 4) } : end
+        const to = arrival ? { x: tip.x + arrival.x * Math.max(44, padding + 4),
+          y: tip.y + arrival.y * Math.max(44, padding + 4) } : end
         const boxes = texts.map((item) => hitbox(item, padding))
         const clearLeg = (a: Point, b: Point, attachedId?: string) => !texts.some((item, index) =>
           item.id !== attachedId && crosses(a, b, boxes[index]))
         if (!clearLeg(start, from, tail.textId) || !clearLeg(to, end, head.textId)) continue
-        const route = centeredOrthogonalRoute(from, to, boxes, horizontalFirst, horizontalLast)
-          ?? orthogonalRoute(from, to, boxes)
+        const route = centeredOrthogonalRoute(from, to, boxes, horizontalFirst, horizontalLast, arrival)
+          ?? orthogonalRoute(from, to, boxes, arrival)
         if (!route) continue
         const points = [start, ...route, end]
           .filter((point, index, all) => index === 0 || point.x !== all[index - 1].x || point.y !== all[index - 1].y)
@@ -426,18 +418,21 @@ export function arrowGeometry(tail: Anchor, head: Anchor, bend: Point, texts: Te
           handle: routeMiddle(points) }
       }
     }
-    const middleX = (start.x + end.x) / 2
-    const middleY = (start.y + end.y) / 2
+    const arrival = head.side ? sideDirection(head.side, { x: 0, y: 0 }) : null
+    const approach = arrival ? { x: tip.x + arrival.x * 44, y: tip.y + arrival.y * 44 } : end
+    const middleX = (start.x + approach.x) / 2
+    const middleY = (start.y + approach.y) / 2
     const corners = horizontalFirst === horizontalLast
       ? horizontalFirst
-        ? [{ x: middleX, y: start.y }, { x: middleX, y: end.y }]
-        : [{ x: start.x, y: middleY }, { x: end.x, y: middleY }]
+        ? [{ x: approach.x, y: start.y }, approach]
+        : [{ x: start.x, y: approach.y }, approach]
       : horizontalFirst
-        ? [{ x: middleX, y: start.y }, { x: middleX, y: middleY }, { x: end.x, y: middleY }]
-        : [{ x: start.x, y: middleY }, { x: middleX, y: middleY }, { x: middleX, y: end.y }]
+        ? [{ x: middleX, y: start.y }, { x: middleX, y: approach.y }, approach]
+        : [{ x: start.x, y: middleY }, { x: approach.x, y: middleY }, approach]
+    const points = [start, ...corners, end]
     return { start, tip, end,
-      path: `M ${start.x} ${start.y} ${corners.map((corner) => `L ${corner.x} ${corner.y}`).join(' ')} L ${end.x} ${end.y}`,
-      handle: corners[Math.floor(corners.length / 2)] }
+      path: `M ${points.map((point) => `${point.x} ${point.y}`).join(' L ')}`,
+      handle: routeMiddle(points) }
   }
   const finalDirection = sideDirection(undefined, { x: tip.x - end.x, y: tip.y - end.y })
   const straightLength = Math.min(28, Math.hypot(end.x - start.x, end.y - start.y) * .25)
