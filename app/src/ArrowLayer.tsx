@@ -207,8 +207,8 @@ function cubicCrossesHitboxes(start: Point, first: Point, second: Point, end: Po
   return false
 }
 
-function visibleRoute(from: Point, to: Point, boxes: Hitbox[]): Point[] | null {
-  if (!boxes.some((box) => crosses(from, to, box))) return [from, to]
+function visibleRoute(from: Point, to: Point, boxes: Hitbox[], outward?: Point | null): Point[] | null {
+  if (!boxes.some((box) => crosses(from, to, box)) && validArrival([from, to], outward)) return [from, to]
   const nodes: Point[] = [from, to]
   for (const box of boxes) {
     for (const point of [
@@ -232,6 +232,7 @@ function visibleRoute(from: Point, to: Point, boxes: Hitbox[]): Point[] | null {
     if (current === 1) break
     visited[current] = true
     for (let next = 0; next < nodes.length; next++) {
+      if (next === 1 && !validArrival([nodes[current], nodes[next]], outward)) continue
       if (next === current || visited[next] || boxes.some((box) => crosses(nodes[current], nodes[next], box))) continue
       const cost = distance[current] + Math.hypot(nodes[next].x - nodes[current].x, nodes[next].y - nodes[current].y)
       if (cost < distance[next]) { distance[next] = cost; previous[next] = current }
@@ -371,6 +372,21 @@ function routeMiddle(points: Point[]): Point {
   return points[points.length - 1]
 }
 
+function routeBacktracks(points: Point[]) {
+  for (let i = 1; i < points.length - 1; i++) {
+    const before = points[i - 1]
+    const corner = points[i]
+    const after = points[i + 1]
+    const incoming = { x: corner.x - before.x, y: corner.y - before.y }
+    const outgoing = { x: after.x - corner.x, y: after.y - corner.y }
+    const cross = incoming.x * outgoing.y - incoming.y * outgoing.x
+    const dot = incoming.x * outgoing.x + incoming.y * outgoing.y
+    const lengths = Math.hypot(incoming.x, incoming.y) * Math.hypot(outgoing.x, outgoing.y)
+    if (lengths > 1e-6 && dot < 0 && Math.abs(cross) < lengths * .02) return true
+  }
+  return false
+}
+
 export function arrowGeometry(tail: Anchor, head: Anchor, bend: Point, texts: TextItem[], bendEdited = false,
   bendOffset?: BendOffset, avoidObstacles = true, shape: ArrowShape = 'curved', curveBends?: [Point, Point, Point], pendingStraightBend?: Point) {
   bend = relativeBend(tail, head, bend, bendOffset, texts)
@@ -490,27 +506,32 @@ export function arrowGeometry(tail: Anchor, head: Anchor, bend: Point, texts: Te
   const approach = head.side ? sideDirection(head.side, { x: 0, y: 0 }) : null
   const from = escape ? { x: start.x + escape.x * (clearance + 2),
     y: start.y + escape.y * (clearance + 2) } : start
-  for (const padding of [clearance, 8, 1]) {
-    const obstacles = texts.map((item) => hitbox(item, padding))
-    const via = bendEdited && !obstacles.some((box) => inside(bend, box)) ? bend : null
-    if (bendEdited && !via) continue
-    for (const distance of [76, 52, 44, clearance + 2]) {
-      const to = approach ? { x: tip.x + approach.x * distance, y: tip.y + approach.y * distance }
-        : { x: end.x - finalDirection.x * distance, y: end.y - finalDirection.y * distance }
-      if (to.x < 0 || to.x > BOARD_WIDTH || to.y < 0 || to.y > BOARD_HEIGHT
-        || obstacles.some((box) => inside(to, box))
-        || boxes.some((box) => crosses(start, from, box) || crosses(to, end, box))) continue
-      const firstLeg = visibleRoute(from, via ?? to, obstacles)
-      const secondLeg = via ? visibleRoute(via, to, obstacles) : null
-      if (!firstLeg || (via && !secondLeg)) continue
-      const points = [start, ...firstLeg, ...(secondLeg?.slice(1) ?? []), end]
-        .filter((point, index, all) => index === 0 || Math.hypot(point.x - all[index - 1].x, point.y - all[index - 1].y) > 1e-6)
-      for (const radius of [38, 28, 18, 8, 2]) {
-        const route = pathThrough(points, radius, boxes)
-        if (route) return { start, tip, end, ...route }
+  for (const keepBend of bendEdited ? [true, false] : [false]) {
+    for (const padding of [clearance, 8, 1]) {
+      const obstacles = texts.map((item) => hitbox(item, padding))
+      const via = keepBend && !obstacles.some((box) => inside(bend, box)) ? bend : null
+      if (keepBend && !via) continue
+      for (const distance of [76, 52, 44, clearance + 2]) {
+        const to = approach ? { x: tip.x + approach.x * distance, y: tip.y + approach.y * distance }
+          : { x: end.x - finalDirection.x * distance, y: end.y - finalDirection.y * distance }
+        if (to.x < 0 || to.x > BOARD_WIDTH || to.y < 0 || to.y > BOARD_HEIGHT
+          || obstacles.some((box) => inside(to, box))
+          || boxes.some((box) => crosses(start, from, box) || crosses(to, end, box))) continue
+        const firstLeg = visibleRoute(from, via ?? to, obstacles, via ? null : approach)
+        const secondLeg = via ? visibleRoute(via, to, obstacles, approach) : null
+        if (!firstLeg || (via && !secondLeg)) continue
+        const points = [start, ...firstLeg, ...(secondLeg?.slice(1) ?? []), end]
+          .filter((point, index, all) => index === 0 || Math.hypot(point.x - all[index - 1].x, point.y - all[index - 1].y) > 1e-6)
+        if (routeBacktracks(points)) continue
+        for (const radius of [38, 28, 18, 8, 2]) {
+          const route = pathThrough(points, radius, boxes)
+          if (route) return { start, tip, end, ...route }
+        }
       }
     }
   }
+  if (bendEdited) return arrowGeometry(tail, head, initialBend(start, end, tail.side, head.side),
+    texts, false, undefined, true, shape)
   return { start, tip, end, path: naturalPath, handle }
 }
 

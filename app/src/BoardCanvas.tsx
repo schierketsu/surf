@@ -1050,7 +1050,13 @@ export default function BoardCanvas() {
         left={viewState.x + (selectedArrowHandle?.x ?? selectedArrow.bend.x) * viewState.scale}
         top={Math.max(12, viewState.y + (selectedArrowHandle?.y ?? selectedArrow.bend.y) * viewState.scale - 72)}
         onColor={(color) => setArrows((current) => current.map((arrow) => arrow.id === selectedArrow.id ? { ...arrow, color } : arrow))}
-        onShape={(shape) => setArrows((current) => current.map((arrow) => arrow.id === selectedArrow.id ? { ...arrow, shape } : arrow))}
+        onShape={(shape) => setArrows((current) => current.map((arrow) => {
+          if (arrow.id !== selectedArrow.id || arrow.shape === shape) return arrow
+          const start = resolveArrowHead(arrow.tail, textsRef.current)
+          const end = resolveArrowShaftEnd(arrow.tail, arrow.head, textsRef.current)
+          return { ...arrow, shape, bend: initialBend(start, end, arrow.tail.side, arrow.head.side),
+            bendEdited: false, bendOffset: undefined, curveBends: undefined, pendingStraightBend: undefined }
+        }))}
         onDash={(dash) => setArrows((current) => current.map((arrow) => arrow.id === selectedArrow.id ? { ...arrow, dash } : arrow))}
         onDelete={() => { setArrows((current) => current.filter((arrow) => arrow.id !== selectedArrow.id)); setSelectedArrowId(null) }} />}
       {viewState && navigationMode === 'cursor' && selectedTexts.length > 1 && <GroupSelection items={selectedTexts} view={viewState}
