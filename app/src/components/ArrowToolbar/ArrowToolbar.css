@@ -12,6 +12,80 @@
   box-shadow: 0 3px 16px rgb(0 0 0 / 12%);
 }
 
+.arrow-toolbar__end-control { position: relative; }
+.arrow-toolbar__end-button,
+.arrow-toolbar__swap-button {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: #272727;
+  cursor: pointer;
+}
+.arrow-toolbar__end-button:hover,
+.arrow-toolbar__end-button[aria-expanded='true'],
+.arrow-toolbar__swap-button:hover { background: #eef2f6; }
+.arrow-toolbar__end-icon { position: relative; display: block; width: 28px; height: 22px; }
+.arrow-toolbar__end-icon svg { display: block; width: 100%; height: 100%; }
+.arrow-toolbar__end-asset {
+  position: absolute;
+  top: 5px;
+  width: 12px;
+  height: 12px;
+  background: currentColor;
+  mask-position: center;
+  mask-repeat: no-repeat;
+  mask-size: contain;
+  -webkit-mask-position: center;
+  -webkit-mask-repeat: no-repeat;
+  -webkit-mask-size: contain;
+}
+.arrow-toolbar__end-asset--tail { left: 0; transform: rotate(180deg); }
+.arrow-toolbar__end-asset--head { right: 0; }
+.arrow-toolbar__swap-button img {
+  display: block;
+  width: 18px;
+  height: 18px;
+  object-fit: contain;
+  opacity: 0.82;
+}
+.arrow-toolbar__swap-button:hover img { opacity: 1; }
+.arrow-toolbar__end-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 50%;
+  z-index: 7;
+  display: grid;
+  grid-template-columns: repeat(2, 46px);
+  gap: 6px;
+  width: 112px;
+  padding: 7px;
+  border: 1px solid #e7e9ed;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 4px 18px rgb(0 0 0 / 14%);
+  transform: translateX(-50%);
+}
+.arrow-toolbar__end-menu button {
+  display: grid;
+  width: 46px;
+  height: 42px;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #272727;
+  cursor: pointer;
+}
+.arrow-toolbar__end-menu button:hover { background: #eef2f6; }
+.arrow-toolbar__end-menu button[aria-pressed='true'] { color: #3764ff; background: #eef2f6; }
+.arrow-toolbar__end-menu .arrow-toolbar__end-icon { width: 32px; height: 24px; }
+
 .arrow-toolbar__color {
   display: flex;
   align-items: center;

@@ -1,13 +1,15 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import ToolPanel, { type NavigationMode } from './components/ToolPanel/ToolPanel'
+import ToolPanel, { STICKER_DRAG_TYPE, type NavigationMode, type StickerStyle } from './components/ToolPanel/ToolPanel'
 import ZoomControls from './components/ZoomControls/ZoomControls'
 import TextBox, { MAX_FONT_SIZE, MIN_FONT_SIZE, MIN_TEXT_HEIGHT, MIN_TEXT_WIDTH, type TextItem } from './components/TextBox/TextBox'
 import GroupSelection from './components/GroupSelection/GroupSelection'
 import TextToolbar from './components/TextToolbar/TextToolbar'
 import { BOARD_HEIGHT, BOARD_WIDTH, MINI_CELLS_PER_SIDE, gridLevelForScale, visitVisibleCells, type WorldRect } from './gridHierarchy'
-import ArrowLayer, { anchorPoint, arrowGeometry, arrowTarget, bendOffsetFor, initialBend, resolveArrowHead, resolveArrowShaftEnd, type Anchor, type Arrow, type ArrowDrag, type Point } from './ArrowLayer'
+import ArrowLayer, { anchorPoint, arrowGeometry, arrowTarget, bendOffsetFor, initialBend, resolveArrowHead, resolveArrowShaftEnd, type Anchor, type Arrow, type ArrowDrag, type ConnectableItem, type Point } from './ArrowLayer'
 import ArrowToolbar from './components/ArrowToolbar/ArrowToolbar'
 import type { ConnectorSide } from './components/TextBox/TextBox'
+import Sticker, { type StickerItem } from './components/Sticker/Sticker'
+import StickerToolbar from './components/StickerToolbar/StickerToolbar'
 
 type View = { scale: number; x: number; y: number }
 type SelectionRect = { left: number; top: number; width: number; height: number }
@@ -15,15 +17,16 @@ type FormatCommand = 'bold' | 'italic' | 'underline' | 'strikeThrough'
 
 const MAX_SCALE = 4
 const WHEEL_ZOOM_SENSITIVITY = 0.002
+const KEYBOARD_PAN_STEP = 80
 const INITIAL_TEXT_WIDTH = 180
 const INITIAL_TEXT_HEIGHT = 24
+const INITIAL_STICKER_SIZE = 160
 const VISIBLE_EDGE_GAP = 8
 const ARROW_DRAG_THRESHOLD = 6
 const OBJECT_CLIPBOARD_TYPE = 'application/x-doska-objects+json'
 const OBJECT_CLIPBOARD_PREFIX = 'DOSKA_OBJECTS_V1:'
 
 type ObjectClipboard = { version: 1; texts: TextItem[]; arrows: Arrow[] }
-
 function occupiedConnectorKeys(items: Arrow[], exceptArrowId?: string) {
   const occupied = new Set<string>()
   for (const arrow of items) {
@@ -119,7 +122,7 @@ function withoutInlineTextColors(html: string) {
   return container.innerHTML
 }
 
-function moveArrowBend(arrow: Arrow, point: Point, index = 1, texts: TextItem[], finish = false): Arrow {
+function moveArrowBend(arrow: Arrow, point: Point, index = 1, texts: ConnectableItem[], finish = false): Arrow {
   if (arrow.shape === 'straight') {
     if (!arrow.curveBends && !finish) return { ...arrow, pendingStraightBend: point }
     const start = resolveArrowHead(arrow.tail, texts)
@@ -146,13 +149,17 @@ export default function BoardCanvas() {
   const pendingTextChangeBaseRef = useRef<TextItem[] | null>(null)
   const zoomRef = useRef<(factor: number) => void>(() => {})
   const textModeRef = useRef(false)
+  const stickerModeRef = useRef<StickerStyle | null>(null)
   const navigationModeRef = useRef<NavigationMode>('cursor')
   const textsRef = useRef<TextItem[]>([])
+  const connectableItemsRef = useRef<ConnectableItem[]>([])
   const arrowsRef = useRef<Arrow[]>([])
   const arrowDragRef = useRef<ArrowDrag | null>(null)
   const selectedIdRef = useRef<string | null>(null)
   const editorRefs = useRef(new Map<string, HTMLDivElement>())
+  const stickerEditorRefs = useRef(new Map<string, HTMLDivElement>())
   const selectionRef = useRef<Range | null>(null)
+  const stickerSelectionRef = useRef<Range | null>(null)
   const pasteCountRef = useRef(0)
   const arrowGeometryCacheRef = useRef(new Map<string, {
     arrow: Arrow
@@ -163,6 +170,10 @@ export default function BoardCanvas() {
   const [zoomLimits, setZoomLimits] = useState({ atMin: false, atMax: false })
   const [viewState, setViewState] = useState<View | null>(null)
   const [texts, setTexts] = useState<TextItem[]>([])
+  const [stickers, setStickers] = useState<StickerItem[]>([])
+  const [selectedStickerId, setSelectedStickerId] = useState<string | null>(null)
+  const [editingStickerId, setEditingStickerId] = useState<string | null>(null)
+  const [focusStickerId, setFocusStickerId] = useState<string | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [multiSelectedIds, setMultiSelectedIds] = useState<string[]>([])
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -176,13 +187,40 @@ export default function BoardCanvas() {
   const [arrowPointer, setArrowPointer] = useState<Point | null>(null)
   const [snapAnchor, setSnapAnchor] = useState<Anchor | null>(null)
 
+  const addStickerAtClient = (sticker: StickerStyle, clientX: number, clientY: number) => {
+    const board = boardRef.current
+    const view = viewRef.current
+    if (!board || !view) return
+    const bounds = board.getBoundingClientRect()
+    const centerX = (clientX - bounds.left - view.x) / view.scale
+    const centerY = (clientY - bounds.top - view.y) / view.scale
+    const id = crypto.randomUUID()
+    setStickers((current) => [...current, {
+      ...sticker,
+      id,
+      x: Math.max(0, Math.min(BOARD_WIDTH - INITIAL_STICKER_SIZE, centerX - INITIAL_STICKER_SIZE / 2)),
+      y: Math.max(0, Math.min(BOARD_HEIGHT - INITIAL_STICKER_SIZE, centerY - INITIAL_STICKER_SIZE / 2)),
+      width: INITIAL_STICKER_SIZE,
+      height: INITIAL_STICKER_SIZE,
+      html: '',
+      fontSize: 16,
+      align: 'center',
+    }])
+    setSelectedStickerId(id)
+    setSelectedId(null)
+    setMultiSelectedIds([])
+    setSelectedArrowId(null)
+  }
+
+  const connectableItems = [...texts, ...stickers]
   textsRef.current = texts
+  connectableItemsRef.current = connectableItems
   arrowsRef.current = arrows
   arrowDragRef.current = arrowDrag
   selectedIdRef.current = selectedId
 
-  const geometryTextKey = JSON.stringify(texts.map(({ id, x, y, width, height, fontSize }) =>
-    [id, x, y, width, height, fontSize]))
+  const geometryTextKey = JSON.stringify(connectableItems.map(({ id, x, y, width, height }) =>
+    [id, x, y, width, height]))
   const draggingArrowId = arrowDrag?.active ? arrowDrag.arrowId : null
   const arrowGeometries = useMemo(() => {
     const previous = arrowGeometryCacheRef.current
@@ -196,9 +234,11 @@ export default function BoardCanvas() {
         && cached.arrow.bend === arrow.bend && cached.arrow.bendOffset === arrow.bendOffset
         && cached.arrow.bendEdited === arrow.bendEdited && cached.arrow.shape === arrow.shape
         && cached.arrow.curveBends === arrow.curveBends && cached.arrow.pendingStraightBend === arrow.pendingStraightBend
+        && cached.arrow.tailEnd === arrow.tailEnd
       const geometry = sameShape && cached?.textKey === geometryTextKey && cached.avoidObstacles === avoidObstacles
         ? cached.geometry
-        : arrowGeometry(arrow.tail, arrow.head, arrow.bend, texts, arrow.bendEdited, arrow.bendOffset, avoidObstacles, arrow.shape, arrow.curveBends, arrow.pendingStraightBend)
+        : arrowGeometry(arrow.tail, arrow.head, arrow.bend, connectableItems, arrow.bendEdited, arrow.bendOffset,
+          avoidObstacles, arrow.shape, arrow.curveBends, arrow.pendingStraightBend, arrow.tailEnd)
       next.set(arrow.id, { arrow, textKey: geometryTextKey, avoidObstacles, geometry })
       geometries.set(arrow.id, geometry)
     }
@@ -231,21 +271,27 @@ export default function BoardCanvas() {
     let moveFrame: number | null = null
     let latestMove: { x: number; y: number } | null = null
     let dragActivated = Boolean(arrowDrag.active)
+    const occupiedForDrag = () => {
+      const occupied = occupiedConnectorKeys(arrowsRef.current, arrowDrag.arrowId)
+      if (arrowDrag.kind === 'new' && arrowDrag.tail?.textId && arrowDrag.tail.side) {
+        occupied.add(`${arrowDrag.tail.textId}:${arrowDrag.tail.side}`)
+      }
+      return occupied
+    }
     const applyMove = (clientX: number, clientY: number) => {
       const board = boardRef.current
       const view = viewRef.current
       if (!board || !view) return
       const bounds = board.getBoundingClientRect()
       const point = { x: (clientX - bounds.left - view.x) / view.scale, y: (clientY - bounds.top - view.y) / view.scale }
-      const excluded = arrowDrag.kind === 'new' ? arrowDrag.tail?.textId : undefined
-      const occupied = occupiedConnectorKeys(arrowsRef.current, arrowDrag.arrowId)
-      const target: Anchor = arrowDrag.kind === 'bend' ? point : arrowTarget(point, textsRef.current, view.scale, excluded, occupied)
+      const target: Anchor = arrowDrag.kind === 'bend' ? point
+        : arrowTarget(point, connectableItemsRef.current, view.scale, undefined, occupiedForDrag())
       const snap = target.textId ? target : null
       if (arrowDrag.kind === 'new') setArrowPointer(target)
       if (arrowDrag.kind !== 'bend') setSnapAnchor(snap)
       if (arrowDrag.kind === 'bend' && arrowDrag.arrowId) {
         setArrows((current) => current.map((arrow) => arrow.id === arrowDrag.arrowId
-          ? moveArrowBend(arrow, point, arrowDrag.bendIndex, textsRef.current)
+          ? moveArrowBend(arrow, point, arrowDrag.bendIndex, connectableItemsRef.current)
           : arrow))
       } else if (arrowDrag.kind !== 'new' && arrowDrag.arrowId) {
         const endpoint = target
@@ -253,7 +299,7 @@ export default function BoardCanvas() {
           if (arrow.id !== arrowDrag.arrowId) return arrow
           const next = { ...arrow, [arrowDrag.kind]: endpoint }
           return next.bendEdited ? next : { ...next, bend: initialBend(
-            resolveArrowHead(next.tail, textsRef.current), resolveArrowShaftEnd(next.tail, next.head, textsRef.current), next.tail.side, next.head.side) }
+            resolveArrowHead(next.tail, connectableItemsRef.current), resolveArrowShaftEnd(next.tail, next.head, connectableItemsRef.current), next.tail.side, next.head.side) }
         }))
       }
     }
@@ -261,8 +307,8 @@ export default function BoardCanvas() {
       if ((arrowDrag.kind !== 'tail' && arrowDrag.kind !== 'head') || !arrowDrag.arrowId) return
       setArrows((current) => current.map((arrow) => {
         if (arrow.id !== arrowDrag.arrowId) return arrow
-        const start = resolveArrowHead(arrow.tail, textsRef.current)
-        const end = resolveArrowShaftEnd(arrow.tail, arrow.head, textsRef.current)
+        const start = resolveArrowHead(arrow.tail, connectableItemsRef.current)
+        const end = resolveArrowShaftEnd(arrow.tail, arrow.head, connectableItemsRef.current)
         return { ...arrow, bend: initialBend(start, end, arrow.tail.side, arrow.head.side),
           bendEdited: false, bendOffset: undefined }
       }))
@@ -295,26 +341,27 @@ export default function BoardCanvas() {
       if (!board || !view) { setArrowDrag(null); return }
       const bounds = board.getBoundingClientRect()
       const point = { x: (clientX - bounds.left - view.x) / view.scale, y: (clientY - bounds.top - view.y) / view.scale }
-      const occupied = occupiedConnectorKeys(arrowsRef.current, arrowDrag.arrowId)
-      const target: Anchor = arrowDrag.kind === 'bend' ? point : arrowTarget(point, textsRef.current, view.scale,
-        arrowDrag.kind === 'new' ? arrowDrag.tail?.textId : undefined, occupied)
+      const target: Anchor = arrowDrag.kind === 'bend' ? point
+        : arrowTarget(point, connectableItemsRef.current, view.scale, undefined, occupiedForDrag())
       if (arrowDrag.kind === 'new' && arrowDrag.tail) {
         const tail = arrowDrag.tail
         const head: Anchor = target
-        const start = resolveArrowHead(tail, textsRef.current)
+        const start = resolveArrowHead(tail, connectableItemsRef.current)
         if (Math.hypot(start.x - head.x, start.y - head.y) > 6) {
           const id = crypto.randomUUID()
-          const target = resolveArrowShaftEnd(tail, head, textsRef.current)
+          const target = resolveArrowShaftEnd(tail, head, connectableItemsRef.current)
           setArrows((current) => [...current, { id, tail, head,
-            bend: initialBend(start, target, tail.side, head.side), color: '#272727' }])
+            bend: initialBend(start, target, tail.side, head.side), color: '#272727',
+            tailEnd: 'none', headEnd: 'arrow' }])
           setSelectedArrowId(id)
           setSelectedId(null)
+          setSelectedStickerId(null)
           setMultiSelectedIds([])
           setEditingId(null)
         }
       } else if (arrowDrag.kind === 'bend' && arrowDrag.arrowId) {
         setArrows((current) => current.map((arrow) => arrow.id === arrowDrag.arrowId
-          ? moveArrowBend(arrow, point, arrowDrag.bendIndex, textsRef.current, true)
+          ? moveArrowBend(arrow, point, arrowDrag.bendIndex, connectableItemsRef.current, true)
           : arrow))
       } else if (arrowDrag.arrowId) {
         const endpoint = target
@@ -322,7 +369,7 @@ export default function BoardCanvas() {
           if (arrow.id !== arrowDrag.arrowId) return arrow
           const next = { ...arrow, [arrowDrag.kind]: endpoint }
           return next.bendEdited ? next : { ...next, bend: initialBend(
-            resolveArrowHead(next.tail, textsRef.current), resolveArrowShaftEnd(next.tail, next.head, textsRef.current), next.tail.side, next.head.side) }
+            resolveArrowHead(next.tail, connectableItemsRef.current), resolveArrowShaftEnd(next.tail, next.head, connectableItemsRef.current), next.tail.side, next.head.side) }
         }))
       }
       setArrowDrag(null)
@@ -355,7 +402,7 @@ export default function BoardCanvas() {
   const startArrow = (id: string, side: ConnectorSide, startClient: Point, pointerId: number) => {
     if (arrowDrag) return
     if (occupiedConnectorKeys(arrows).has(`${id}:${side}`)) return
-    const item = textsRef.current.find((text) => text.id === id)
+    const item = connectableItemsRef.current.find((object) => object.id === id)
     if (!item) return
     const point = anchorPoint(item, side)
     const tail: Anchor = { ...point, textId: id, side }
@@ -423,6 +470,7 @@ export default function BoardCanvas() {
 
   const selectText = (id: string) => {
     setSelectedArrowId(null)
+    setSelectedStickerId(null)
     if (selectedId !== id) {
       const previousEditor = selectedId ? editorRefs.current.get(selectedId) : null
       if (previousEditor && document.activeElement === previousEditor) previousEditor.blur()
@@ -436,6 +484,75 @@ export default function BoardCanvas() {
     }
     setSelectedId(id)
     setMultiSelectedIds([])
+  }
+
+  const selectSticker = (id: string) => {
+    const editor = editingId ? editorRefs.current.get(editingId) : null
+    if (editor && document.activeElement === editor) editor.blur()
+    clearTextSelection()
+    setSelectedArrowId(null)
+    setSelectedId(null)
+    setMultiSelectedIds([])
+    setEditingId(null)
+    setFocusId(null)
+    setSelectedStickerId(id)
+  }
+
+  const editSticker = (id: string) => {
+    selectSticker(id)
+    setEditingStickerId(id)
+    setFocusStickerId(id)
+  }
+
+  const changeSticker = (id: string, changes: Partial<StickerItem>) => {
+    setStickers((current) => current.map((sticker) => sticker.id === id ? { ...sticker, ...changes } : sticker))
+  }
+
+  const saveStickerSelection = () => {
+    const selection = window.getSelection()
+    if (selection?.rangeCount) stickerSelectionRef.current = selection.getRangeAt(0).cloneRange()
+  }
+
+  const formatSticker = (command: FormatCommand) => {
+    if (!selectedStickerId) return
+    const editor = stickerEditorRefs.current.get(selectedStickerId)
+    const selection = window.getSelection()
+    const currentRange = selection?.rangeCount ? selection.getRangeAt(0).cloneRange() : null
+    const range = currentRange && !currentRange.collapsed && editor?.contains(currentRange.commonAncestorContainer)
+      ? currentRange
+      : stickerSelectionRef.current && !stickerSelectionRef.current.collapsed
+        && editor?.contains(stickerSelectionRef.current.commonAncestorContainer)
+        ? stickerSelectionRef.current.cloneRange()
+        : null
+    if (editor?.isContentEditable && selection && range) {
+      editor.focus()
+      selection.removeAllRanges()
+      selection.addRange(range)
+      document.execCommand(command)
+      changeSticker(selectedStickerId, { html: editor.innerHTML })
+      saveStickerSelection()
+      return
+    }
+    const item = stickers.find((sticker) => sticker.id === selectedStickerId)
+    if (item) changeSticker(selectedStickerId, { [command]: !item[command] })
+  }
+
+  const deleteSticker = (id: string) => {
+    setStickers((current) => current.filter((sticker) => sticker.id !== id))
+    setArrows((current) => current.filter((arrow) => arrow.tail.textId !== id && arrow.head.textId !== id))
+    setSelectedStickerId((current) => current === id ? null : current)
+    setEditingStickerId((current) => current === id ? null : current)
+    setFocusStickerId((current) => current === id ? null : current)
+  }
+
+  const copySticker = (item: StickerItem) => {
+    const id = crypto.randomUUID()
+    setStickers((current) => [...current, { ...item, id,
+      x: Math.min(BOARD_WIDTH - item.width, item.x + 20),
+      y: Math.min(BOARD_HEIGHT - item.height, item.y + 20) }])
+    setSelectedStickerId(id)
+    setEditingStickerId(null)
+    setFocusStickerId(null)
   }
 
   const editText = (id: string) => {
@@ -468,16 +585,20 @@ export default function BoardCanvas() {
     if (selection?.rangeCount) selectionRef.current = selection.getRangeAt(0).cloneRange()
   }
 
+  const toggleTextFormat = (ids: string[], key: FormatCommand) => {
+    const selectedIds = new Set(ids)
+    setTexts((current) => {
+      const selected = current.filter((item) => selectedIds.has(item.id))
+      const nextValue = !selected.every((item) => Boolean(item[key]))
+      return current.map((item) => selectedIds.has(item.id) ? { ...item, [key]: nextValue } : item)
+    })
+  }
+
   const formatText = (command: string, value?: string) => {
+    const key = command as FormatCommand
+    if (!['bold', 'italic', 'underline', 'strikeThrough'].includes(key)) return
     if (multiSelectedIds.length) {
-      const key = command as FormatCommand
-      if (!['bold', 'italic', 'underline', 'strikeThrough'].includes(key)) return
-      const ids = new Set(multiSelectedIds)
-      setTexts((current) => {
-        const group = current.filter((item) => ids.has(item.id))
-        const nextValue = !group.every((item) => Boolean(item[key]))
-        return current.map((item) => ids.has(item.id) ? { ...item, [key]: nextValue } : item)
-      })
+      toggleTextFormat(multiSelectedIds, key)
       return
     }
     if (!selectedId) return
@@ -485,16 +606,25 @@ export default function BoardCanvas() {
     if (!editor) return
     const selection = window.getSelection()
     const currentRange = selection?.rangeCount ? selection.getRangeAt(0).cloneRange() : null
-    editor.focus()
     const range = currentRange && !currentRange.collapsed && editor.contains(currentRange.commonAncestorContainer)
       ? currentRange
-      : selectionRef.current
-    if (selection && range && editor.contains(range.commonAncestorContainer)) {
-      selection.removeAllRanges()
-      selection.addRange(range)
-    } else if (selection) {
-      selection.selectAllChildren(editor)
+      : selectionRef.current && !selectionRef.current.collapsed
+        && editor.contains(selectionRef.current.commonAncestorContainer)
+        ? selectionRef.current.cloneRange()
+        : null
+
+    // Outside edit mode there is no editable selection for execCommand. Apply the
+    // format to the block model instead; the same path also handles an editor with
+    // only a caret and keeps whole-block formatting predictable.
+    if (!editor.isContentEditable || !selection || !range) {
+      toggleTextFormat([selectedId], key)
+      selectionRef.current = null
+      return
     }
+
+    editor.focus()
+    selection.removeAllRanges()
+    selection.addRange(range)
     document.execCommand(command, false, value)
     changeText(selectedId, { html: editor.innerHTML })
     saveSelection()
@@ -662,6 +792,26 @@ export default function BoardCanvas() {
     window.addEventListener('keydown', onArrowKey)
     return () => window.removeEventListener('keydown', onArrowKey)
   }, [selectedArrowId])
+
+  useEffect(() => {
+    if (!selectedStickerId || navigationMode !== 'cursor') return
+    const onStickerKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') { setSelectedStickerId(null); return }
+      if (event.key !== 'Delete' || event.defaultPrevented) return
+      event.preventDefault()
+      deleteSticker(selectedStickerId)
+    }
+    window.addEventListener('keydown', onStickerKey)
+    return () => window.removeEventListener('keydown', onStickerKey)
+  }, [selectedStickerId, navigationMode])
+
+  useEffect(() => {
+    if (editingStickerId && editingStickerId !== selectedStickerId) {
+      setEditingStickerId(null)
+      setFocusStickerId(null)
+      stickerSelectionRef.current = null
+    }
+  }, [selectedStickerId, editingStickerId])
 
   useLayoutEffect(() => {
     const ids = ensureTextVisibleIdsRef.current
@@ -869,8 +1019,37 @@ export default function BoardCanvas() {
       zoomAt(Math.exp(-pixels * WHEEL_ZOOM_SENSITIVITY), event.clientX - bounds.left, event.clientY - bounds.top)
     }
 
+    const onPanKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.ctrlKey || event.altKey || event.metaKey) return
+      const target = event.target
+      if (target instanceof HTMLElement
+        && (target.isContentEditable || Boolean(target.closest('input, textarea, select, button')))) return
+      const direction = event.key === 'ArrowLeft' ? { x: 1, y: 0 }
+        : event.key === 'ArrowRight' ? { x: -1, y: 0 }
+        : event.key === 'ArrowUp' ? { x: 0, y: 1 }
+        : event.key === 'ArrowDown' ? { x: 0, y: -1 }
+        : null
+      const view = viewRef.current
+      if (!direction || !view) return
+      event.preventDefault()
+      const { width, height } = board.getBoundingClientRect()
+      const distance = KEYBOARD_PAN_STEP * (event.shiftKey ? 3 : 1)
+      applyView(keepBoardInView({ ...view,
+        x: view.x + direction.x * distance,
+        y: view.y + direction.y * distance,
+      }, width, height))
+    }
+
     const onPointerDown = (event: PointerEvent) => {
       if (event.pointerType === 'mouse' && event.button !== 0) return
+      if (navigationModeRef.current === 'cursor' && stickerModeRef.current) {
+        event.preventDefault()
+        addStickerAtClient(stickerModeRef.current, event.clientX, event.clientY)
+        stickerModeRef.current = null
+        canvas.classList.remove('is-sticker-mode')
+        setResetToCursorToken((current) => current + 1)
+        return
+      }
       if (navigationModeRef.current === 'cursor' && textModeRef.current) {
         event.preventDefault()
         clearTextSelection()
@@ -908,6 +1087,7 @@ export default function BoardCanvas() {
         document.activeElement instanceof HTMLElement && document.activeElement.blur()
         clearTextSelection()
         setSelectedArrowId(null)
+        setSelectedStickerId(null)
         setSelectedId(null)
         setMultiSelectedIds([])
         setEditingId(null)
@@ -968,6 +1148,7 @@ export default function BoardCanvas() {
     const observer = new ResizeObserver(resize)
     observer.observe(board)
     window.addEventListener('resize', resize)
+    window.addEventListener('keydown', onPanKeyDown)
     board.addEventListener('wheel', onWheel, { passive: false })
     canvas.addEventListener('pointerdown', onPointerDown)
     canvas.addEventListener('pointermove', onPointerMove)
@@ -978,6 +1159,7 @@ export default function BoardCanvas() {
     return () => {
       observer.disconnect()
       window.removeEventListener('resize', resize)
+      window.removeEventListener('keydown', onPanKeyDown)
       if (frame !== null) window.cancelAnimationFrame(frame)
       board.removeEventListener('wheel', onWheel)
       canvas.removeEventListener('pointerdown', onPointerDown)
@@ -991,6 +1173,7 @@ export default function BoardCanvas() {
     ? texts.filter((item) => multiSelectedIds.includes(item.id))
     : texts.filter((item) => item.id === selectedId)
   const selectedText = selectedTexts[0]
+  const selectedSticker = stickers.find((sticker) => sticker.id === selectedStickerId)
   const selectedArrow = arrows.find((arrow) => arrow.id === selectedArrowId)
   const occupiedConnectors = occupiedConnectorKeys(arrows)
   const selectedArrowHandle = selectedArrow ? arrowGeometries.get(selectedArrow.id)?.handle : null
@@ -1013,6 +1196,13 @@ export default function BoardCanvas() {
   const toolbarTop = selectedBounds && viewState
     ? Math.max(12, viewState.y + selectedBounds.top * viewState.scale - toolbarOffset)
     : 12
+  const stickerToolbarCenterX = selectedSticker && viewState
+    ? viewState.x + (selectedSticker.x + selectedSticker.width / 2) * viewState.scale
+    : 0
+  const stickerToolbarTop = selectedSticker && viewState
+    ? Math.max(12, viewState.y + selectedSticker.y * viewState.scale
+      - (46 + (24 - 6) * viewState.scale))
+    : 12
   const groupFormats = selectedTexts.length > 1 ? {
     bold: selectedTexts.every((item) => Boolean(item.bold)),
     italic: selectedTexts.every((item) => Boolean(item.italic)),
@@ -1022,11 +1212,38 @@ export default function BoardCanvas() {
   const visible = visibleVerticalBounds(viewState, boardRef.current?.clientHeight ?? 0)
 
   return (
-    <main ref={boardRef} className={`board${navigationMode === 'hand' ? ' board--hand' : ' board--cursor'}`} aria-label="Поле доски 3840 на 2160 пикселей">
+    <main ref={boardRef} className={`board${navigationMode === 'hand' ? ' board--hand' : ' board--cursor'}`} aria-label="Поле доски 3840 на 2160 пикселей"
+      onDragOver={(event) => {
+        if (!Array.from(event.dataTransfer.types).includes(STICKER_DRAG_TYPE)) return
+        event.preventDefault()
+        event.dataTransfer.dropEffect = 'copy'
+      }}
+      onDrop={(event) => {
+        const value = event.dataTransfer.getData(STICKER_DRAG_TYPE)
+        if (!value) return
+        event.preventDefault()
+        try {
+          const sticker = JSON.parse(value) as Partial<StickerStyle>
+          if (typeof sticker.name === 'string' && typeof sticker.fill === 'string' && typeof sticker.border === 'string') {
+            addStickerAtClient(sticker as StickerStyle, event.clientX, event.clientY)
+          }
+        } catch { /* Ignore malformed external drag data. */ }
+      }}>
       <canvas ref={canvasRef} className="board-canvas">
         Поле доски требует поддержки Canvas.
       </canvas>
       {viewState && <div className="board-objects" style={{ width: BOARD_WIDTH, height: BOARD_HEIGHT, transform: `translate(${viewState.x}px, ${viewState.y}px) scale(${viewState.scale})` }}>
+        {stickers.map((sticker) => <Sticker key={sticker.id} item={sticker} selected={selectedStickerId === sticker.id}
+          interactive={navigationMode === 'cursor'} editing={editingStickerId === sticker.id}
+          focusOnMount={focusStickerId === sticker.id && editingStickerId === sticker.id}
+          scale={viewState.scale} onSelect={selectSticker} onEdit={editSticker} onChange={changeSticker}
+          onEditorRef={(id, node) => { if (node) stickerEditorRefs.current.set(id, node); else stickerEditorRefs.current.delete(id) }}
+          onSaveSelection={saveStickerSelection}
+          showConnectors={arrowDrag !== null && (arrowDrag.kind !== 'bend' && arrowDrag.kind !== 'new' || Boolean(arrowDrag.active))}
+          occupiedSides={(['top', 'right', 'bottom', 'left'] as ConnectorSide[])
+            .filter((side) => occupiedConnectors.has(`${sticker.id}:${side}`))}
+          snapSide={snapAnchor?.textId === sticker.id ? snapAnchor.side ?? null : null}
+          onConnectorStart={startArrow} />)}
         {texts.map((item) => <TextBox key={item.id} item={item} selected={selectedId === item.id || multiSelectedIds.includes(item.id)}
           groupSelected={multiSelectedIds.length > 1 && multiSelectedIds.includes(item.id)} interactive={navigationMode === 'cursor'}
           editing={editingId === item.id} focusOnMount={focusId === item.id && editingId === item.id}
@@ -1040,20 +1257,28 @@ export default function BoardCanvas() {
           onConnectorStart={startArrow}
           onEditorRef={(id, node) => { if (node) editorRefs.current.set(id, node); else editorRefs.current.delete(id) }} />)}
       </div>}
-      {viewState && <ArrowLayer arrows={arrows} texts={texts} geometries={arrowGeometries} view={viewState} selectedId={selectedArrowId}
+      {viewState && <ArrowLayer arrows={arrows} texts={connectableItems} geometries={arrowGeometries} view={viewState} selectedId={selectedArrowId}
         preview={arrowDrag?.kind === 'new' && arrowDrag.active && arrowDrag.tail && arrowPointer
           ? { tail: arrowDrag.tail, head: snapAnchor ?? arrowPointer } : null}
-        onSelect={(id) => { setSelectedArrowId(id); setSelectedId(null); setMultiSelectedIds([]); setEditingId(null) }}
+        onSelect={(id) => { setSelectedArrowId(id); setSelectedStickerId(null); setSelectedId(null); setMultiSelectedIds([]); setEditingId(null) }}
         onDrag={setArrowDrag} />}
       {viewState && selectedArrow && navigationMode === 'cursor' && <ArrowToolbar color={selectedArrow.color}
         shape={selectedArrow.shape ?? 'curved'} dash={selectedArrow.dash ?? 'solid'}
+        tailEnd={selectedArrow.tailEnd ?? 'none'} headEnd={selectedArrow.headEnd ?? 'arrow'}
         left={viewState.x + (selectedArrowHandle?.x ?? selectedArrow.bend.x) * viewState.scale}
         top={Math.max(12, viewState.y + (selectedArrowHandle?.y ?? selectedArrow.bend.y) * viewState.scale - 72)}
+        onTailEnd={(tailEnd) => setArrows((current) => current.map((arrow) =>
+          arrow.id === selectedArrow.id ? { ...arrow, tailEnd } : arrow))}
+        onHeadEnd={(headEnd) => setArrows((current) => current.map((arrow) =>
+          arrow.id === selectedArrow.id ? { ...arrow, headEnd } : arrow))}
+        onSwapEnds={() => setArrows((current) => current.map((arrow) => arrow.id === selectedArrow.id
+          ? { ...arrow, tailEnd: arrow.headEnd ?? 'arrow', headEnd: arrow.tailEnd ?? 'none' }
+          : arrow))}
         onColor={(color) => setArrows((current) => current.map((arrow) => arrow.id === selectedArrow.id ? { ...arrow, color } : arrow))}
         onShape={(shape) => setArrows((current) => current.map((arrow) => {
           if (arrow.id !== selectedArrow.id || arrow.shape === shape) return arrow
-          const start = resolveArrowHead(arrow.tail, textsRef.current)
-          const end = resolveArrowShaftEnd(arrow.tail, arrow.head, textsRef.current)
+          const start = resolveArrowHead(arrow.tail, connectableItemsRef.current)
+          const end = resolveArrowShaftEnd(arrow.tail, arrow.head, connectableItemsRef.current)
           return { ...arrow, shape, bend: initialBend(start, end, arrow.tail.side, arrow.head.side),
             bendEdited: false, bendOffset: undefined, curveBends: undefined, pendingStraightBend: undefined }
         }))}
@@ -1073,17 +1298,35 @@ export default function BoardCanvas() {
         onFormat={formatText} onColor={setTextColor}
         onCopy={() => { const payload = selectedObjectClipboard(); if (payload) writeObjectClipboard(payload) }}
         onDelete={deleteSelectedTexts} />}
-      <ToolPanel resetToCursorToken={resetToCursorToken} onNavigationModeChange={(mode) => {
+      {selectedSticker && viewState && navigationMode === 'cursor' && <StickerToolbar item={selectedSticker}
+        centerX={stickerToolbarCenterX} top={stickerToolbarTop}
+        onChange={(changes) => changeSticker(selectedSticker.id, changes)}
+        onFormat={formatSticker} onCopy={() => copySticker(selectedSticker)} onDelete={() => deleteSticker(selectedSticker.id)} />}
+      <ToolPanel resetToCursorToken={resetToCursorToken} boardScale={viewState?.scale ?? 1} onNavigationModeChange={(mode) => {
         navigationModeRef.current = mode
         setNavigationMode(mode)
         if (mode === 'hand') {
           if (document.activeElement instanceof HTMLElement) document.activeElement.blur()
           clearTextSelection()
           setSelectedId(null)
+          setSelectedStickerId(null)
           setMultiSelectedIds([])
           setEditingId(null)
           setFocusId(null)
           setSelectionRect(null)
+        }
+      }} onStickerToolChange={(sticker) => {
+        stickerModeRef.current = sticker
+        canvasRef.current?.classList.toggle('is-sticker-mode', Boolean(sticker))
+        if (sticker) {
+          textModeRef.current = false
+          canvasRef.current?.classList.remove('is-text-mode')
+          clearTextSelection()
+          setSelectedId(null)
+          setSelectedStickerId(null)
+          setMultiSelectedIds([])
+          setEditingId(null)
+          setFocusId(null)
         }
       }} onTextToolChange={(active) => {
         const editor = editingId ? editorRefs.current.get(editingId) : null
@@ -1092,6 +1335,7 @@ export default function BoardCanvas() {
         canvasRef.current?.classList.toggle('is-text-mode', active)
         clearTextSelection()
         setSelectedId(null)
+        setSelectedStickerId(null)
         setMultiSelectedIds([])
         setEditingId(null)
         setFocusId(null)

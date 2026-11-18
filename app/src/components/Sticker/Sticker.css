@@ -1,0 +1,49 @@
+.board-sticker {
+  position: absolute;
+  box-sizing: border-box;
+  min-width: 56px;
+  min-height: 56px;
+  padding: 16px;
+  overflow: visible;
+  color: #272727;
+  font: 16px/1.4 'Doska', Arial, sans-serif;
+  overflow-wrap: anywhere;
+  box-shadow: 0 2px 6px rgb(0 0 0 / 12%);
+  pointer-events: auto;
+}
+
+.board-sticker--selected {
+  outline: 1px solid #0057ff;
+  outline-offset: -1px;
+}
+
+.board-sticker__editor {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  overflow: hidden;
+  outline: 0;
+  line-height: 1.25;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.board-sticker__editor:empty {
+  display: block;
+  padding-top: calc(50% - .625em);
+}
+
+.board-sticker__body {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: move;
+  touch-action: none;
+}

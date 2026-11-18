@@ -1,0 +1,33 @@
+.sticker-toolbar__auto-size {
+  gap: 6px;
+  padding-left: 3px;
+}
+
+.sticker-toolbar__auto-size > .sticker-toolbar__auto {
+  width: 42px;
+  height: 34px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #3e4652;
+  cursor: default;
+  text-align: center;
+}
+
+.sticker-toolbar__auto-size > .sticker-toolbar__auto:disabled,
+.sticker-toolbar__auto-size > .sticker-toolbar__auto:disabled:hover {
+  background: transparent;
+  opacity: .3;
+}
+
+.sticker-toolbar__color-button > span {
+  display: block;
+  width: 20px;
+  height: 20px;
+  border: 1px solid rgb(39 39 39 / 10%);
+  border-radius: 50%;
+}
+
+.sticker-toolbar__colors {
+  right: -45px;
+}

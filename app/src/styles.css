@@ -106,6 +106,10 @@ h6 {
   cursor: text;
 }
 
+.board-canvas.is-sticker-mode {
+  cursor: crosshair;
+}
+
 .board-objects {
   position: absolute;
   z-index: 1;
@@ -134,8 +138,6 @@ h6 {
   pointer-events: none;
   transform-origin: 0 0;
 }
-
-.board-arrow-handle--bend:hover { transform: scale(1.5); }
 
 .board--hand .text-box,
 .board--hand .text-box * {

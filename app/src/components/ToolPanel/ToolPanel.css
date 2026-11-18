@@ -188,8 +188,40 @@
   border: 1px solid;
   border-radius: 0;
   box-shadow: 0 2px 5px rgb(0 0 0 / 12%);
-  cursor: pointer;
+  cursor: grab;
+  transition: transform 120ms ease, outline-color 120ms ease;
   -webkit-tap-highlight-color: transparent;
+}
+
+.tool-panel__swatch:hover {
+  outline: 2px solid #a7b1be;
+  outline-offset: 2px;
+  transform: scale(1.08);
+}
+
+.tool-panel__swatch:active {
+  cursor: grabbing;
+}
+
+.tool-panel__sticker-drag-preview {
+  position: fixed;
+  z-index: 1000;
+  width: 160px;
+  height: 160px;
+  border: 1px solid rgb(39 39 39 / 8%);
+  box-shadow: 0 2px 6px rgb(0 0 0 / 12%);
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+}
+
+.tool-panel__native-drag-ghost {
+  position: fixed;
+  top: -10px;
+  left: -10px;
+  width: 1px;
+  height: 1px;
+  background: transparent;
+  pointer-events: none;
 }
 
 @media (prefers-reduced-motion: reduce) {

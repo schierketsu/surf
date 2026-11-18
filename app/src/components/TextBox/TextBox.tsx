@@ -1,5 +1,6 @@
-import { useEffect, useLayoutEffect, useRef } from 'react'
+import { useEffect, useLayoutEffect, useRef, type CSSProperties } from 'react'
 import { BOARD_HEIGHT, BOARD_WIDTH } from '../../gridHierarchy'
+import HandleDot from '../HandleDot'
 import './TextBox.css'
 
 export const MIN_FONT_SIZE = 10
@@ -254,7 +255,9 @@ export default function TextBox({ item, selected, groupSelected, interactive, ed
   return (
     <div
       className={`text-box${selected ? ' text-box--selected' : ''}`}
-      style={{ left: item.x, top: item.y, width: item.width, height: item.height, opacity: item.opacity, backgroundColor: item.highlight }}
+      style={{ left: item.x, top: item.y, width: item.width, height: item.height, opacity: item.opacity,
+        backgroundColor: item.highlight, '--handle-inverse-scale': 1 / scale,
+        '--handle-screen-size': `${Math.max(6, Math.min(18, 6 * scale))}px` } as CSSProperties}
       onPointerDown={(event) => { event.stopPropagation(); onSelect(item.id) }}
     >
       <div
@@ -343,7 +346,9 @@ export default function TextBox({ item, selected, groupSelected, interactive, ed
             onPointerDown={(event) => startGesture(event, 'resize', corner)}
             onPointerMove={continueGesture}
             onPointerUp={() => { gesture.current = null; requestAnimationFrame(() => measureHeightRef.current()) }}
-            onPointerCancel={() => { gesture.current = null; requestAnimationFrame(() => measureHeightRef.current()) }} />)}
+            onPointerCancel={() => { gesture.current = null; requestAnimationFrame(() => measureHeightRef.current()) }}>
+            <HandleDot kind="resize" />
+          </button>)}
         </>
       )}
       {interactive && !groupSelected && (selected || showConnectors) && EDGES.filter(({ edge }) => !occupiedSides.includes(edge)).map(({ edge }) => <button key={edge} type="button"
@@ -353,7 +358,7 @@ export default function TextBox({ item, selected, groupSelected, interactive, ed
           event.preventDefault()
           event.stopPropagation()
           onConnectorStart(item.id, edge, { x: event.clientX, y: event.clientY }, event.pointerId)
-        }} />)}
+        }}><HandleDot kind="connector" snap={snapSide === edge} /></button>)}
       {item.comment && <span className="text-box__comment" title={item.comment} aria-label={`Комментарий: ${item.comment}`}>●</span>}
     </div>
   )

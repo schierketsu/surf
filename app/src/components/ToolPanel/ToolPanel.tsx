@@ -6,11 +6,13 @@ import './ToolPanel.css'
 
 type DrawingTool = 'pencil' | 'highlighter'
 export type NavigationMode = 'cursor' | 'hand'
+export type StickerStyle = { name: string; fill: string; border: string }
+export const STICKER_DRAG_TYPE = 'application/x-doska-sticker+json'
 type ActiveTool = DrawingTool | 'text' | 'sticker' | null
 type OpenMenu = 'drawing' | 'stickers' | null
 type IconName = DrawingTool | 'text' | 'sticker'
 
-const stickers = [
+export const STICKER_COLORS = [
   { name: 'Жёлтый', fill: '#fff3b0', border: '#f6db84' },
   { name: 'Персиковый', fill: '#ffc49d', border: '#ff9d69' },
   { name: 'Коралловый', fill: '#f8babb', border: '#ef9298' },
@@ -34,12 +36,15 @@ function Icon({ name }: { name: IconName }) {
 
 type ToolPanelProps = {
   onTextToolChange: (active: boolean) => void
+  onStickerToolChange: (sticker: StickerStyle | null) => void
   onNavigationModeChange: (mode: NavigationMode) => void
   resetToCursorToken: number
+  boardScale: number
 }
 
-export default function ToolPanel({ onTextToolChange, onNavigationModeChange, resetToCursorToken }: ToolPanelProps) {
+export default function ToolPanel({ onTextToolChange, onStickerToolChange, onNavigationModeChange, resetToCursorToken, boardScale }: ToolPanelProps) {
   const rootRef = useRef<HTMLDivElement>(null)
+  const dragPreviewRef = useRef<HTMLDivElement | null>(null)
   const [navigationMode, setNavigationMode] = useState<NavigationMode>('cursor')
   const [drawingTool, setDrawingTool] = useState<DrawingTool>('pencil')
   const [activeTool, setActiveTool] = useState<ActiveTool>(null)
@@ -67,6 +72,8 @@ export default function ToolPanel({ onTextToolChange, onNavigationModeChange, re
     }
   }, [])
 
+  useEffect(() => () => dragPreviewRef.current?.remove(), [])
+
   return (
     <div className="tool-panel-root" ref={rootRef}>
       <button
@@ -84,6 +91,7 @@ export default function ToolPanel({ onTextToolChange, onNavigationModeChange, re
           setOpenMenu(null)
           setActiveTool(null)
           onTextToolChange(false)
+          onStickerToolChange(null)
         }}
       >
         <span className="tool-panel__navigation-slot">
@@ -106,6 +114,7 @@ export default function ToolPanel({ onTextToolChange, onNavigationModeChange, re
             setActiveTool(drawingTool)
             setOpenMenu(openMenu === 'drawing' ? null : 'drawing')
             onTextToolChange(false)
+            onStickerToolChange(null)
           }}
         >
           <Icon name={drawingTool} />
@@ -122,6 +131,7 @@ export default function ToolPanel({ onTextToolChange, onNavigationModeChange, re
             setActiveTool('text')
             setOpenMenu(null)
             onTextToolChange(true)
+            onStickerToolChange(null)
           }}
         >
           <Icon name="text" />
@@ -138,6 +148,7 @@ export default function ToolPanel({ onTextToolChange, onNavigationModeChange, re
             setActiveTool('sticker')
             setOpenMenu(openMenu === 'stickers' ? null : 'stickers')
             onTextToolChange(false)
+            onStickerToolChange(null)
           }}
         >
           <Icon name="sticker" />
@@ -159,6 +170,7 @@ export default function ToolPanel({ onTextToolChange, onNavigationModeChange, re
                 setActiveTool(tool)
                 setOpenMenu(null)
                 onTextToolChange(false)
+                onStickerToolChange(null)
               }}
             >
               <Icon name={tool} />
@@ -169,15 +181,57 @@ export default function ToolPanel({ onTextToolChange, onNavigationModeChange, re
 
       {openMenu === 'stickers' && (
         <div id="sticker-colors" className="tool-panel__popover tool-panel__popover--stickers" role="group" aria-label="Цвет стикера">
-          {stickers.map((sticker) => (
+          {STICKER_COLORS.map((sticker) => (
             <button
               key={sticker.name}
               className="tool-panel__swatch"
               type="button"
+              draggable
               aria-label={`${sticker.name} стикер`}
               title={sticker.name}
               style={{ backgroundColor: sticker.fill, borderColor: sticker.border }}
-              onClick={() => setOpenMenu(null)}
+              onClick={() => {
+                setNavigationMode('cursor')
+                onNavigationModeChange('cursor')
+                setActiveTool('sticker')
+                setOpenMenu(null)
+                onTextToolChange(false)
+                onStickerToolChange(sticker)
+              }}
+              onDragStart={(event) => {
+                event.dataTransfer.effectAllowed = 'copy'
+                event.dataTransfer.setData(STICKER_DRAG_TYPE, JSON.stringify(sticker))
+                const preview = document.createElement('div')
+                preview.className = 'tool-panel__sticker-drag-preview'
+                preview.style.backgroundColor = sticker.fill
+                const previewSize = Math.min(160 * boardScale,
+                  Math.max(80, Math.min(window.innerWidth, window.innerHeight) - 32))
+                preview.style.width = `${previewSize}px`
+                preview.style.height = `${previewSize}px`
+                preview.style.left = `${event.clientX}px`
+                preview.style.top = `${event.clientY}px`
+                document.body.appendChild(preview)
+                dragPreviewRef.current?.remove()
+                dragPreviewRef.current = preview
+
+                const nativeGhost = document.createElement('div')
+                nativeGhost.className = 'tool-panel__native-drag-ghost'
+                document.body.appendChild(nativeGhost)
+                event.dataTransfer.setDragImage(nativeGhost, 0, 0)
+                requestAnimationFrame(() => nativeGhost.remove())
+              }}
+              onDrag={(event) => {
+                if (!dragPreviewRef.current || event.clientX === 0 && event.clientY === 0) return
+                dragPreviewRef.current.style.left = `${event.clientX}px`
+                dragPreviewRef.current.style.top = `${event.clientY}px`
+              }}
+              onDragEnd={() => {
+                dragPreviewRef.current?.remove()
+                dragPreviewRef.current = null
+                setActiveTool(null)
+                setOpenMenu(null)
+                onStickerToolChange(null)
+              }}
             />
           ))}
         </div>
