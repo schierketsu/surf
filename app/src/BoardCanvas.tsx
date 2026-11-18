@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import ToolPanel, { STICKER_DRAG_TYPE, type NavigationMode, type StickerStyle } from './components/ToolPanel/ToolPanel'
+import ToolPanel, { STICKER_DRAG_TYPE, type DrawingStyle, type NavigationMode, type StickerStyle } from './components/ToolPanel/ToolPanel'
 import ZoomControls from './components/ZoomControls/ZoomControls'
 import TextBox, { MAX_FONT_SIZE, MIN_FONT_SIZE, MIN_TEXT_HEIGHT, MIN_TEXT_WIDTH, type TextItem } from './components/TextBox/TextBox'
 import GroupSelection from './components/GroupSelection/GroupSelection'
@@ -10,10 +10,13 @@ import ArrowToolbar from './components/ArrowToolbar/ArrowToolbar'
 import type { ConnectorSide } from './components/TextBox/TextBox'
 import Sticker, { type StickerItem } from './components/Sticker/Sticker'
 import StickerToolbar from './components/StickerToolbar/StickerToolbar'
+import Drawing, { drawingPath, type DrawingItem } from './components/Drawing/Drawing'
+import DrawingToolbar from './components/DrawingToolbar/DrawingToolbar'
 
 type View = { scale: number; x: number; y: number }
 type SelectionRect = { left: number; top: number; width: number; height: number }
 type FormatCommand = 'bold' | 'italic' | 'underline' | 'strikeThrough'
+type DrawingDraft = DrawingStyle & { points: Point[] }
 
 const MAX_SCALE = 4
 const WHEEL_ZOOM_SENSITIVITY = 0.002
@@ -122,6 +125,25 @@ function withoutInlineTextColors(html: string) {
   return container.innerHTML
 }
 
+function drawingFromDraft(draft: DrawingDraft): DrawingItem | null {
+  if (!draft.points.length) return null
+  const halfWidth = draft.width / 2
+  const minX = Math.min(...draft.points.map((point) => point.x))
+  const maxX = Math.max(...draft.points.map((point) => point.x))
+  const minY = Math.min(...draft.points.map((point) => point.y))
+  const maxY = Math.max(...draft.points.map((point) => point.y))
+  const x = Math.max(0, minX - halfWidth)
+  const y = Math.max(0, minY - halfWidth)
+  const right = Math.min(BOARD_WIDTH, maxX + halfWidth)
+  const bottom = Math.min(BOARD_HEIGHT, maxY + halfWidth)
+  const width = Math.max(1, right - x)
+  const height = Math.max(1, bottom - y)
+  return {
+    id: crypto.randomUUID(), x, y, width, height, color: draft.color, strokeWidth: draft.width,
+    points: draft.points.map((point) => ({ x: point.x - x, y: point.y - y })),
+  }
+}
+
 function moveArrowBend(arrow: Arrow, point: Point, index = 1, texts: ConnectableItem[], finish = false): Arrow {
   if (arrow.shape === 'straight') {
     if (!arrow.curveBends && !finish) return { ...arrow, pendingStraightBend: point }
@@ -143,6 +165,7 @@ function moveArrowBend(arrow: Arrow, point: Point, index = 1, texts: Connectable
 export default function BoardCanvas() {
   const boardRef = useRef<HTMLElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  const drawingCaptureRef = useRef<HTMLDivElement>(null)
   const viewRef = useRef<View | null>(null)
   const applyViewRef = useRef<(view: View) => void>(() => {})
   const ensureTextVisibleIdsRef = useRef(new Set<string>())
@@ -150,6 +173,7 @@ export default function BoardCanvas() {
   const zoomRef = useRef<(factor: number) => void>(() => {})
   const textModeRef = useRef(false)
   const stickerModeRef = useRef<StickerStyle | null>(null)
+  const drawingModeRef = useRef<DrawingStyle | null>(null)
   const navigationModeRef = useRef<NavigationMode>('cursor')
   const textsRef = useRef<TextItem[]>([])
   const connectableItemsRef = useRef<ConnectableItem[]>([])
@@ -171,6 +195,10 @@ export default function BoardCanvas() {
   const [viewState, setViewState] = useState<View | null>(null)
   const [texts, setTexts] = useState<TextItem[]>([])
   const [stickers, setStickers] = useState<StickerItem[]>([])
+  const [drawings, setDrawings] = useState<DrawingItem[]>([])
+  const [drawingStyle, setDrawingStyle] = useState<DrawingStyle | null>(null)
+  const [drawingDraft, setDrawingDraft] = useState<DrawingDraft | null>(null)
+  const [selectedDrawingId, setSelectedDrawingId] = useState<string | null>(null)
   const [selectedStickerId, setSelectedStickerId] = useState<string | null>(null)
   const [editingStickerId, setEditingStickerId] = useState<string | null>(null)
   const [focusStickerId, setFocusStickerId] = useState<string | null>(null)
@@ -207,6 +235,7 @@ export default function BoardCanvas() {
       align: 'center',
     }])
     setSelectedStickerId(id)
+    setSelectedDrawingId(null)
     setSelectedId(null)
     setMultiSelectedIds([])
     setSelectedArrowId(null)
@@ -356,6 +385,7 @@ export default function BoardCanvas() {
           setSelectedArrowId(id)
           setSelectedId(null)
           setSelectedStickerId(null)
+          setSelectedDrawingId(null)
           setMultiSelectedIds([])
           setEditingId(null)
         }
@@ -471,6 +501,7 @@ export default function BoardCanvas() {
   const selectText = (id: string) => {
     setSelectedArrowId(null)
     setSelectedStickerId(null)
+    setSelectedDrawingId(null)
     if (selectedId !== id) {
       const previousEditor = selectedId ? editorRefs.current.get(selectedId) : null
       if (previousEditor && document.activeElement === previousEditor) previousEditor.blur()
@@ -491,11 +522,36 @@ export default function BoardCanvas() {
     if (editor && document.activeElement === editor) editor.blur()
     clearTextSelection()
     setSelectedArrowId(null)
+    setSelectedDrawingId(null)
     setSelectedId(null)
     setMultiSelectedIds([])
     setEditingId(null)
     setFocusId(null)
     setSelectedStickerId(id)
+  }
+
+  const selectDrawing = (id: string) => {
+    clearTextSelection()
+    setSelectedArrowId(null)
+    setSelectedStickerId(null)
+    setSelectedId(null)
+    setMultiSelectedIds([])
+    setEditingId(null)
+    setFocusId(null)
+    setSelectedDrawingId(id)
+  }
+
+  const changeDrawing = (id: string, changes: Partial<DrawingItem>) => {
+    setDrawings((current) => current.map((drawing) => drawing.id === id ? { ...drawing, ...changes } : drawing))
+  }
+
+  const changeDrawingStrokeWidth = (id: string, width: number) => {
+    setDrawings((current) => current.map((drawing) => {
+      if (drawing.id !== id || drawing.strokeWidth === width) return drawing
+      const resized = drawingFromDraft({ color: drawing.color, width, preset: 0,
+        points: drawing.points.map((point) => ({ x: drawing.x + point.x, y: drawing.y + point.y })) })
+      return resized ? { ...resized, id: drawing.id } : drawing
+    }))
   }
 
   const editSticker = (id: string) => {
@@ -551,6 +607,7 @@ export default function BoardCanvas() {
       x: Math.min(BOARD_WIDTH - item.width, item.x + 20),
       y: Math.min(BOARD_HEIGHT - item.height, item.y + 20) }])
     setSelectedStickerId(id)
+    setSelectedDrawingId(null)
     setEditingStickerId(null)
     setFocusStickerId(null)
   }
@@ -806,6 +863,21 @@ export default function BoardCanvas() {
   }, [selectedStickerId, navigationMode])
 
   useEffect(() => {
+    if (!selectedDrawingId || navigationMode !== 'cursor') return
+    const onDrawingKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') { setSelectedDrawingId(null); return }
+      if (event.key !== 'Delete' || event.defaultPrevented) return
+      const target = event.target
+      if (target instanceof HTMLElement && (target.isContentEditable || target.closest('input, textarea, select'))) return
+      event.preventDefault()
+      setDrawings((current) => current.filter((drawing) => drawing.id !== selectedDrawingId))
+      setSelectedDrawingId(null)
+    }
+    window.addEventListener('keydown', onDrawingKey)
+    return () => window.removeEventListener('keydown', onDrawingKey)
+  }, [selectedDrawingId, navigationMode])
+
+  useEffect(() => {
     if (editingStickerId && editingStickerId !== selectedStickerId) {
       setEditingStickerId(null)
       setFocusStickerId(null)
@@ -835,10 +907,13 @@ export default function BoardCanvas() {
   useEffect(() => {
     const board = boardRef.current
     const canvas = canvasRef.current
-    if (!board || !canvas) return
+    const drawingCapture = drawingCaptureRef.current
+    if (!board || !canvas || !drawingCapture) return
 
     let previousSize = { width: 0, height: 0 }
     let drag: { kind: 'pan' | 'select'; pointerId: number; x: number; y: number; startX: number; startY: number } | null = null
+    let drawingGesture: DrawingDraft & { pointerId: number } | null = null
+    let drawingPointerSurface: Element | null = null
     let frame: number | null = null
 
     const draw = () => {
@@ -1042,6 +1117,28 @@ export default function BoardCanvas() {
 
     const onPointerDown = (event: PointerEvent) => {
       if (event.pointerType === 'mouse' && event.button !== 0) return
+      if (navigationModeRef.current === 'cursor' && drawingModeRef.current) {
+        event.preventDefault()
+        const view = viewRef.current
+        if (!view) return
+        const bounds = board.getBoundingClientRect()
+        const point = {
+          x: Math.max(0, Math.min(BOARD_WIDTH, (event.clientX - bounds.left - view.x) / view.scale)),
+          y: Math.max(0, Math.min(BOARD_HEIGHT, (event.clientY - bounds.top - view.y) / view.scale)),
+        }
+        drawingGesture = { ...drawingModeRef.current, pointerId: event.pointerId, points: [point] }
+        drawingPointerSurface = event.currentTarget as Element
+        setDrawingDraft({ ...drawingModeRef.current, points: [point] })
+        setSelectedArrowId(null)
+        setSelectedStickerId(null)
+        setSelectedDrawingId(null)
+        setSelectedId(null)
+        setMultiSelectedIds([])
+        setEditingId(null)
+        setFocusId(null)
+        drawingPointerSurface.setPointerCapture(event.pointerId)
+        return
+      }
       if (navigationModeRef.current === 'cursor' && stickerModeRef.current) {
         event.preventDefault()
         addStickerAtClient(stickerModeRef.current, event.clientX, event.clientY)
@@ -1088,6 +1185,7 @@ export default function BoardCanvas() {
         clearTextSelection()
         setSelectedArrowId(null)
         setSelectedStickerId(null)
+        setSelectedDrawingId(null)
         setSelectedId(null)
         setMultiSelectedIds([])
         setEditingId(null)
@@ -1098,6 +1196,21 @@ export default function BoardCanvas() {
     }
 
     const onPointerMove = (event: PointerEvent) => {
+      if (drawingGesture && drawingGesture.pointerId === event.pointerId) {
+        const view = viewRef.current
+        if (!view) return
+        const bounds = board.getBoundingClientRect()
+        const point = {
+          x: Math.max(0, Math.min(BOARD_WIDTH, (event.clientX - bounds.left - view.x) / view.scale)),
+          y: Math.max(0, Math.min(BOARD_HEIGHT, (event.clientY - bounds.top - view.y) / view.scale)),
+        }
+        const last = drawingGesture.points[drawingGesture.points.length - 1]
+        if (Math.hypot(point.x - last.x, point.y - last.y) < .5 / view.scale) return
+        drawingGesture.points.push(point)
+        setDrawingDraft({ color: drawingGesture.color, width: drawingGesture.width,
+          preset: drawingGesture.preset, points: [...drawingGesture.points] })
+        return
+      }
       if (!drag || drag.pointerId !== event.pointerId) return
       if (drag.kind === 'select') {
         const bounds = board.getBoundingClientRect()
@@ -1123,6 +1236,30 @@ export default function BoardCanvas() {
     }
 
     const onPointerUp = (event: PointerEvent) => {
+      if (drawingGesture && drawingGesture.pointerId === event.pointerId) {
+        if (event.type !== 'pointercancel') {
+          const view = viewRef.current
+          if (view) {
+            const bounds = board.getBoundingClientRect()
+            const point = {
+              x: Math.max(0, Math.min(BOARD_WIDTH, (event.clientX - bounds.left - view.x) / view.scale)),
+              y: Math.max(0, Math.min(BOARD_HEIGHT, (event.clientY - bounds.top - view.y) / view.scale)),
+            }
+            const last = drawingGesture.points[drawingGesture.points.length - 1]
+            if (Math.hypot(point.x - last.x, point.y - last.y) > .01) drawingGesture.points.push(point)
+          }
+          const drawing = drawingFromDraft(drawingGesture)
+          if (drawing) {
+            setDrawings((current) => [...current, drawing])
+            setSelectedDrawingId(drawing.id)
+          }
+        }
+        drawingGesture = null
+        setDrawingDraft(null)
+        if (drawingPointerSurface?.hasPointerCapture(event.pointerId)) drawingPointerSurface.releasePointerCapture(event.pointerId)
+        drawingPointerSurface = null
+        return
+      }
       if (!drag || drag.pointerId !== event.pointerId) return
       if (drag.kind === 'select' && event.type !== 'pointercancel') {
         const bounds = board.getBoundingClientRect()
@@ -1154,6 +1291,10 @@ export default function BoardCanvas() {
     canvas.addEventListener('pointermove', onPointerMove)
     canvas.addEventListener('pointerup', onPointerUp)
     canvas.addEventListener('pointercancel', onPointerUp)
+    drawingCapture.addEventListener('pointerdown', onPointerDown)
+    drawingCapture.addEventListener('pointermove', onPointerMove)
+    drawingCapture.addEventListener('pointerup', onPointerUp)
+    drawingCapture.addEventListener('pointercancel', onPointerUp)
     resize()
 
     return () => {
@@ -1166,6 +1307,10 @@ export default function BoardCanvas() {
       canvas.removeEventListener('pointermove', onPointerMove)
       canvas.removeEventListener('pointerup', onPointerUp)
       canvas.removeEventListener('pointercancel', onPointerUp)
+      drawingCapture.removeEventListener('pointerdown', onPointerDown)
+      drawingCapture.removeEventListener('pointermove', onPointerMove)
+      drawingCapture.removeEventListener('pointerup', onPointerUp)
+      drawingCapture.removeEventListener('pointercancel', onPointerUp)
     }
   }, [])
 
@@ -1174,6 +1319,7 @@ export default function BoardCanvas() {
     : texts.filter((item) => item.id === selectedId)
   const selectedText = selectedTexts[0]
   const selectedSticker = stickers.find((sticker) => sticker.id === selectedStickerId)
+  const selectedDrawing = drawings.find((drawing) => drawing.id === selectedDrawingId)
   const selectedArrow = arrows.find((arrow) => arrow.id === selectedArrowId)
   const occupiedConnectors = occupiedConnectorKeys(arrows)
   const selectedArrowHandle = selectedArrow ? arrowGeometries.get(selectedArrow.id)?.handle : null
@@ -1203,6 +1349,12 @@ export default function BoardCanvas() {
     ? Math.max(12, viewState.y + selectedSticker.y * viewState.scale
       - (46 + (24 - 6) * viewState.scale))
     : 12
+  const drawingToolbarCenterX = selectedDrawing && viewState
+    ? viewState.x + (selectedDrawing.x + selectedDrawing.width / 2) * viewState.scale
+    : 0
+  const drawingToolbarTop = selectedDrawing && viewState
+    ? Math.max(12, viewState.y + selectedDrawing.y * viewState.scale - (46 + 18 * viewState.scale))
+    : 12
   const groupFormats = selectedTexts.length > 1 ? {
     bold: selectedTexts.every((item) => Boolean(item.bold)),
     italic: selectedTexts.every((item) => Boolean(item.italic)),
@@ -1212,7 +1364,7 @@ export default function BoardCanvas() {
   const visible = visibleVerticalBounds(viewState, boardRef.current?.clientHeight ?? 0)
 
   return (
-    <main ref={boardRef} className={`board${navigationMode === 'hand' ? ' board--hand' : ' board--cursor'}`} aria-label="Поле доски 3840 на 2160 пикселей"
+    <main ref={boardRef} className={`board${navigationMode === 'hand' ? ' board--hand' : ' board--cursor'}${drawingStyle ? ' board--drawing' : ''}`} aria-label="Поле доски 3840 на 2160 пикселей"
       onDragOver={(event) => {
         if (!Array.from(event.dataTransfer.types).includes(STICKER_DRAG_TYPE)) return
         event.preventDefault()
@@ -1232,7 +1384,18 @@ export default function BoardCanvas() {
       <canvas ref={canvasRef} className="board-canvas">
         Поле доски требует поддержки Canvas.
       </canvas>
+      <div ref={drawingCaptureRef} className={`board-drawing-capture${drawingStyle ? ' board-drawing-capture--active' : ''}`}
+        aria-hidden="true" />
       {viewState && <div className="board-objects" style={{ width: BOARD_WIDTH, height: BOARD_HEIGHT, transform: `translate(${viewState.x}px, ${viewState.y}px) scale(${viewState.scale})` }}>
+        {drawings.map((drawing) => <Drawing key={drawing.id} item={drawing}
+          selected={!drawingStyle && selectedDrawingId === drawing.id}
+          interactive={navigationMode === 'cursor' && !drawingStyle} scale={viewState.scale}
+          onSelect={selectDrawing} onChange={changeDrawing} />)}
+        {drawingDraft && <svg className="board-drawing-preview" width={BOARD_WIDTH} height={BOARD_HEIGHT}
+          viewBox={`0 0 ${BOARD_WIDTH} ${BOARD_HEIGHT}`} aria-hidden="true">
+          <path d={drawingPath(drawingDraft.points)} fill="none" stroke={drawingDraft.color}
+            strokeWidth={drawingDraft.width} strokeLinecap="round" strokeLinejoin="round" />
+        </svg>}
         {stickers.map((sticker) => <Sticker key={sticker.id} item={sticker} selected={selectedStickerId === sticker.id}
           interactive={navigationMode === 'cursor'} editing={editingStickerId === sticker.id}
           focusOnMount={focusStickerId === sticker.id && editingStickerId === sticker.id}
@@ -1260,7 +1423,7 @@ export default function BoardCanvas() {
       {viewState && <ArrowLayer arrows={arrows} texts={connectableItems} geometries={arrowGeometries} view={viewState} selectedId={selectedArrowId}
         preview={arrowDrag?.kind === 'new' && arrowDrag.active && arrowDrag.tail && arrowPointer
           ? { tail: arrowDrag.tail, head: snapAnchor ?? arrowPointer } : null}
-        onSelect={(id) => { setSelectedArrowId(id); setSelectedStickerId(null); setSelectedId(null); setMultiSelectedIds([]); setEditingId(null) }}
+        onSelect={(id) => { setSelectedArrowId(id); setSelectedStickerId(null); setSelectedDrawingId(null); setSelectedId(null); setMultiSelectedIds([]); setEditingId(null) }}
         onDrag={setArrowDrag} />}
       {viewState && selectedArrow && navigationMode === 'cursor' && <ArrowToolbar color={selectedArrow.color}
         shape={selectedArrow.shape ?? 'curved'} dash={selectedArrow.dash ?? 'solid'}
@@ -1302,6 +1465,15 @@ export default function BoardCanvas() {
         centerX={stickerToolbarCenterX} top={stickerToolbarTop}
         onChange={(changes) => changeSticker(selectedSticker.id, changes)}
         onFormat={formatSticker} onCopy={() => copySticker(selectedSticker)} onDelete={() => deleteSticker(selectedSticker.id)} />}
+      {selectedDrawing && viewState && navigationMode === 'cursor' && !drawingStyle && <DrawingToolbar
+        color={selectedDrawing.color} width={selectedDrawing.strokeWidth}
+        centerX={drawingToolbarCenterX} top={drawingToolbarTop}
+        onColor={(color) => changeDrawing(selectedDrawing.id, { color })}
+        onWidth={(strokeWidth) => changeDrawingStrokeWidth(selectedDrawing.id, strokeWidth)}
+        onDelete={() => {
+          setDrawings((current) => current.filter((drawing) => drawing.id !== selectedDrawing.id))
+          setSelectedDrawingId(null)
+        }} />}
       <ToolPanel resetToCursorToken={resetToCursorToken} boardScale={viewState?.scale ?? 1} onNavigationModeChange={(mode) => {
         navigationModeRef.current = mode
         setNavigationMode(mode)
@@ -1310,6 +1482,7 @@ export default function BoardCanvas() {
           clearTextSelection()
           setSelectedId(null)
           setSelectedStickerId(null)
+          setSelectedDrawingId(null)
           setMultiSelectedIds([])
           setEditingId(null)
           setFocusId(null)
@@ -1324,6 +1497,7 @@ export default function BoardCanvas() {
           clearTextSelection()
           setSelectedId(null)
           setSelectedStickerId(null)
+          setSelectedDrawingId(null)
           setMultiSelectedIds([])
           setEditingId(null)
           setFocusId(null)
@@ -1336,9 +1510,27 @@ export default function BoardCanvas() {
         clearTextSelection()
         setSelectedId(null)
         setSelectedStickerId(null)
+        setSelectedDrawingId(null)
         setMultiSelectedIds([])
         setEditingId(null)
         setFocusId(null)
+      }} onDrawingToolChange={(style) => {
+        drawingModeRef.current = style
+        setDrawingStyle(style)
+        canvasRef.current?.classList.toggle('is-drawing-mode', Boolean(style))
+        if (style) {
+          textModeRef.current = false
+          stickerModeRef.current = null
+          canvasRef.current?.classList.remove('is-text-mode', 'is-sticker-mode')
+          clearTextSelection()
+          setSelectedId(null)
+          setSelectedStickerId(null)
+          setSelectedDrawingId(null)
+          setSelectedArrowId(null)
+          setMultiSelectedIds([])
+          setEditingId(null)
+          setFocusId(null)
+        }
       }} />
       <ZoomControls
         onZoomOut={() => zoomRef.current(0.8)}

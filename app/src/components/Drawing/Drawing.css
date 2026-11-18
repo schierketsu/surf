@@ -1,0 +1,42 @@
+.board-drawing {
+  position: absolute;
+  box-sizing: border-box;
+  overflow: visible;
+  pointer-events: auto;
+}
+
+.board-drawing--selected {
+  outline: 1px solid #0057ff;
+  outline-offset: -1px;
+}
+
+.board-drawing__stroke {
+  position: absolute;
+  inset: 0;
+  display: block;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.board-drawing__body {
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: move;
+  touch-action: none;
+}
+
+.board-drawing > .text-box__handle { z-index: 2; }
+
+.board-drawing-preview {
+  position: absolute;
+  inset: 0;
+  display: block;
+  overflow: visible;
+  pointer-events: none;
+}

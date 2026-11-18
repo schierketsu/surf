@@ -1,16 +1,24 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import cursorIcon from './icons/cursor.png'
 import handIcon from './icons/hand.png'
 import stickerIcon from './icons/sticker.svg'
+import penIcon from '../../../../assets/pen.png'
+import { TEXT_COLORS } from '../TextToolbar/TextToolbar'
 import './ToolPanel.css'
 
-type DrawingTool = 'pencil' | 'highlighter'
 export type NavigationMode = 'cursor' | 'hand'
 export type StickerStyle = { name: string; fill: string; border: string }
+export type DrawingStyle = { color: string; width: number; preset: number }
 export const STICKER_DRAG_TYPE = 'application/x-doska-sticker+json'
-type ActiveTool = DrawingTool | 'text' | 'sticker' | null
+type ActiveTool = 'drawing' | 'text' | 'sticker' | null
 type OpenMenu = 'drawing' | 'stickers' | null
-type IconName = DrawingTool | 'text' | 'sticker'
+type IconName = 'pencil' | 'text' | 'sticker'
+
+const INITIAL_DRAWING_PRESETS: DrawingStyle[] = [
+  { color: '#272727', width: 2, preset: 0 },
+  { color: '#E60023', width: 8, preset: 1 },
+  { color: '#7C3AED', width: 16, preset: 2 },
+]
 
 export const STICKER_COLORS = [
   { name: 'Жёлтый', fill: '#fff3b0', border: '#f6db84' },
@@ -31,22 +39,29 @@ function Icon({ name }: { name: IconName }) {
   if (name === 'sticker') {
     return <img className="tool-panel__sticker-icon" src={stickerIcon} alt="" aria-hidden="true" />
   }
+  if (name === 'pencil') {
+    return <img className="tool-panel__pen-icon" src={penIcon} alt="" aria-hidden="true" />
+  }
   return <span className={`tool-panel__icon tool-panel__icon--${name}`} aria-hidden="true" />
 }
 
 type ToolPanelProps = {
   onTextToolChange: (active: boolean) => void
   onStickerToolChange: (sticker: StickerStyle | null) => void
+  onDrawingToolChange: (style: DrawingStyle | null) => void
   onNavigationModeChange: (mode: NavigationMode) => void
   resetToCursorToken: number
   boardScale: number
 }
 
-export default function ToolPanel({ onTextToolChange, onStickerToolChange, onNavigationModeChange, resetToCursorToken, boardScale }: ToolPanelProps) {
+export default function ToolPanel({ onTextToolChange, onStickerToolChange, onDrawingToolChange,
+  onNavigationModeChange, resetToCursorToken, boardScale }: ToolPanelProps) {
   const rootRef = useRef<HTMLDivElement>(null)
   const dragPreviewRef = useRef<HTMLDivElement | null>(null)
   const [navigationMode, setNavigationMode] = useState<NavigationMode>('cursor')
-  const [drawingTool, setDrawingTool] = useState<DrawingTool>('pencil')
+  const [drawingPresets, setDrawingPresets] = useState(INITIAL_DRAWING_PRESETS)
+  const [activeDrawingPreset, setActiveDrawingPreset] = useState(0)
+  const [editingDrawingPreset, setEditingDrawingPreset] = useState<number | null>(null)
   const [activeTool, setActiveTool] = useState<ActiveTool>(null)
   const [openMenu, setOpenMenu] = useState<OpenMenu>(null)
 
@@ -55,14 +70,20 @@ export default function ToolPanel({ onTextToolChange, onStickerToolChange, onNav
     setNavigationMode('cursor')
     setActiveTool(null)
     setOpenMenu(null)
+    setEditingDrawingPreset(null)
   }, [resetToCursorToken])
 
   useEffect(() => {
     const closeOnOutsideClick = (event: PointerEvent) => {
-      if (rootRef.current && !rootRef.current.contains(event.target as Node)) setOpenMenu(null)
+      if (!rootRef.current || rootRef.current.contains(event.target as Node)) return
+      setOpenMenu((current) => current === 'drawing' ? current : null)
+      setEditingDrawingPreset(null)
     }
     const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setOpenMenu(null)
+      if (event.key === 'Escape') {
+        setOpenMenu(null)
+        setEditingDrawingPreset(null)
+      }
     }
     document.addEventListener('pointerdown', closeOnOutsideClick)
     document.addEventListener('keydown', closeOnEscape)
@@ -82,16 +103,20 @@ export default function ToolPanel({ onTextToolChange, onStickerToolChange, onNav
         role="switch"
         aria-checked={navigationMode === 'hand'}
         aria-label="Режим ладони"
-        title={navigationMode === 'cursor' ? 'Включить ладонь' : 'Включить курсор'}
-        data-mode={navigationMode}
+        title={activeTool === 'drawing' ? 'Выйти из рисования и включить курсор'
+          : navigationMode === 'cursor' ? 'Включить ладонь' : 'Включить курсор'}
+        data-mode={activeTool === 'drawing' ? 'drawing' : navigationMode}
         onClick={() => {
-          const next = navigationMode === 'cursor' ? 'hand' : 'cursor'
+          const next = activeTool === 'drawing' ? 'cursor'
+            : navigationMode === 'cursor' ? 'hand' : 'cursor'
           setNavigationMode(next)
           onNavigationModeChange(next)
           setOpenMenu(null)
+          setEditingDrawingPreset(null)
           setActiveTool(null)
           onTextToolChange(false)
           onStickerToolChange(null)
+          onDrawingToolChange(null)
         }}
       >
         <span className="tool-panel__navigation-slot">
@@ -109,15 +134,18 @@ export default function ToolPanel({ onTextToolChange, onStickerToolChange, onNav
           title="Инструменты рисования"
           aria-expanded={openMenu === 'drawing'}
           aria-controls="drawing-tools"
-          data-active={activeTool === 'pencil' || activeTool === 'highlighter'}
+          data-active={activeTool === 'drawing'}
           onClick={() => {
-            setActiveTool(drawingTool)
+            setNavigationMode('cursor')
+            onNavigationModeChange('cursor')
+            setActiveTool('drawing')
             setOpenMenu(openMenu === 'drawing' ? null : 'drawing')
             onTextToolChange(false)
             onStickerToolChange(null)
+            onDrawingToolChange(drawingPresets[activeDrawingPreset])
           }}
         >
-          <Icon name={drawingTool} />
+          <Icon name="pencil" />
         </button>
         <button
           className="tool-panel__button"
@@ -132,6 +160,7 @@ export default function ToolPanel({ onTextToolChange, onStickerToolChange, onNav
             setOpenMenu(null)
             onTextToolChange(true)
             onStickerToolChange(null)
+            onDrawingToolChange(null)
           }}
         >
           <Icon name="text" />
@@ -149,6 +178,7 @@ export default function ToolPanel({ onTextToolChange, onStickerToolChange, onNav
             setOpenMenu(openMenu === 'stickers' ? null : 'stickers')
             onTextToolChange(false)
             onStickerToolChange(null)
+            onDrawingToolChange(null)
           }}
         >
           <Icon name="sticker" />
@@ -157,25 +187,62 @@ export default function ToolPanel({ onTextToolChange, onStickerToolChange, onNav
 
       {openMenu === 'drawing' && (
         <div id="drawing-tools" className="tool-panel__popover tool-panel__popover--drawing" role="group" aria-label="Вид инструмента рисования">
-          {(['pencil', 'highlighter'] as const).map((tool) => (
-            <button
-              key={tool}
-              className="tool-panel__option"
-              type="button"
-              aria-label={tool === 'pencil' ? 'Карандаш' : 'Маркер'}
-              title={tool === 'pencil' ? 'Карандаш' : 'Маркер'}
-              aria-pressed={drawingTool === tool}
-              onClick={() => {
-                setDrawingTool(tool)
-                setActiveTool(tool)
-                setOpenMenu(null)
-                onTextToolChange(false)
-                onStickerToolChange(null)
-              }}
-            >
-              <Icon name={tool} />
-            </button>
-          ))}
+          <button className="tool-panel__option" type="button" aria-label="Карандаш" title="Карандаш"
+            aria-pressed={activeTool === 'drawing'} onClick={() => {
+              setActiveTool('drawing')
+              onDrawingToolChange(drawingPresets[activeDrawingPreset])
+            }}><Icon name="pencil" /></button>
+          <span className="tool-panel__drawing-divider" aria-hidden="true" />
+          {drawingPresets.map((preset, index) => <button key={index}
+            className="tool-panel__drawing-preset" type="button"
+            aria-label={`Кисть ${preset.width} пикселей`} title={`${preset.width} px`}
+            aria-pressed={activeDrawingPreset === index}
+            onClick={() => {
+              setNavigationMode('cursor')
+              onNavigationModeChange('cursor')
+              setActiveTool('drawing')
+              setActiveDrawingPreset(index)
+              setEditingDrawingPreset(index)
+              onTextToolChange(false)
+              onStickerToolChange(null)
+              onDrawingToolChange(preset)
+            }}>
+            <span style={{ width: Math.max(4, Math.min(18, preset.width)), height: Math.max(4, Math.min(18, preset.width)),
+              backgroundColor: preset.color }} />
+          </button>)}
+          {editingDrawingPreset !== null && <div className="tool-panel__drawing-settings" role="group"
+            aria-label="Цвет и размер кисти">
+            <div className="tool-panel__drawing-colors">
+              {TEXT_COLORS.map((color) => <button key={color.value} className="tool-panel__drawing-color" type="button"
+                aria-label={color.name} title={color.name}
+                aria-pressed={drawingPresets[editingDrawingPreset].color.toUpperCase() === color.value}
+                style={{ backgroundColor: color.value }} onClick={() => {
+                  const next = drawingPresets.map((preset, index) => index === editingDrawingPreset
+                    ? { ...preset, color: color.value } : preset)
+                  setDrawingPresets(next)
+                  setActiveDrawingPreset(editingDrawingPreset)
+                  setActiveTool('drawing')
+                  onDrawingToolChange(next[editingDrawingPreset])
+                }} />)}
+            </div>
+            <span className="tool-panel__drawing-settings-divider" aria-hidden="true" />
+            <div className="tool-panel__drawing-size">
+              <output>{drawingPresets[editingDrawingPreset].width}px</output>
+              <input type="range" min="1" max="32" step="1"
+                value={drawingPresets[editingDrawingPreset].width} aria-label="Размер кисти"
+                style={{ '--drawing-color': drawingPresets[editingDrawingPreset].color,
+                  '--drawing-size-progress': `${(drawingPresets[editingDrawingPreset].width - 1) / 31 * 100}%` } as CSSProperties}
+                onChange={(event) => {
+                  const width = Number(event.target.value)
+                  const next = drawingPresets.map((preset, index) => index === editingDrawingPreset
+                    ? { ...preset, width } : preset)
+                  setDrawingPresets(next)
+                  setActiveDrawingPreset(editingDrawingPreset)
+                  setActiveTool('drawing')
+                  onDrawingToolChange(next[editingDrawingPreset])
+                }} />
+            </div>
+          </div>}
         </div>
       )}
 
@@ -197,6 +264,7 @@ export default function ToolPanel({ onTextToolChange, onStickerToolChange, onNav
                 setOpenMenu(null)
                 onTextToolChange(false)
                 onStickerToolChange(sticker)
+                onDrawingToolChange(null)
               }}
               onDragStart={(event) => {
                 event.dataTransfer.effectAllowed = 'copy'
@@ -231,6 +299,7 @@ export default function ToolPanel({ onTextToolChange, onStickerToolChange, onNav
                 setActiveTool(null)
                 setOpenMenu(null)
                 onStickerToolChange(null)
+                onDrawingToolChange(null)
               }}
             />
           ))}
