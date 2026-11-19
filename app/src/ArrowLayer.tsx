@@ -570,13 +570,16 @@ type Props = {
   view: { x: number; y: number; scale: number }
   selectedId: string | null
   preview: { tail: Anchor; head: Anchor } | null
-  onSelect: (id: string) => void
+  layers: Map<string, number>
+  multiSelectedIds: string[]
+  onSelect: (id: string, additive?: boolean) => void
   onDrag: (drag: ArrowDrag) => void
 }
 
-export default function ArrowLayer({ arrows, texts, geometries, view, selectedId, preview, onSelect, onDrag }: Props) {
+export default function ArrowLayer({ arrows, texts, geometries, view, selectedId, multiSelectedIds, preview, layers, onSelect, onDrag }: Props) {
   const selectedGeometry = selectedId ? geometries.get(selectedId) : null
   const selectedBendHandles = selectedGeometry && 'bendHandles' in selectedGeometry ? selectedGeometry.bendHandles : null
+  const topLayer = Math.max(0, ...layers.values()) + 1
   const handle = (point: Point, kind: 'tail' | 'head' | 'bend', bendIndex?: number) => <button key={`${kind}-${bendIndex ?? ''}`} type="button"
     className={kind === 'bend' ? 'text-box__midpoint board-arrow-handle--bend' : 'text-box__handle'}
     aria-label={kind === 'tail' ? 'Перетащить начало стрелки' : kind === 'head' ? 'Перетащить конец стрелки' : 'Изогнуть стрелку'}
@@ -590,7 +593,7 @@ export default function ArrowLayer({ arrows, texts, geometries, view, selectedId
     }}><HandleDot kind={kind === 'bend' ? 'connector' : 'resize'} /></button>
   const draw = (id: string, tail: Anchor, head: Anchor, color: string, interactive: boolean,
     dash: ArrowDash, shape: ArrowShape, tailEnd: ArrowEnd, headEnd: ArrowEnd,
-    geometry: ReturnType<typeof arrowGeometry>) => {
+    geometry: ReturnType<typeof arrowGeometry>, markerScope: string, groupSelected = false) => {
     const { start, tip, end, path } = geometry
     const dashPattern = dash === 'long' ? '14 9' : dash === 'short' ? '3 6' : undefined
     const freeMarker = shape === 'straight' || 'bendHandles' in geometry
@@ -599,41 +602,56 @@ export default function ArrowLayer({ arrows, texts, geometries, view, selectedId
       : sideDirection(undefined, { x: end.x - start.x, y: end.y - start.y })
     const tailShaft = { x: start.x + tailDirection.x * 16, y: start.y + tailDirection.y * 16 }
     return <g key={id}>
+      {groupSelected && <path d={`${path} L ${tip.x} ${tip.y}`} fill="none" stroke="#0057ff"
+        strokeWidth={7 / view.scale} strokeLinecap="round" opacity={.32} pointerEvents="none" />}
       <path d={path} fill="none" stroke={color} strokeWidth={3} strokeLinecap="round"
         strokeDasharray={dashPattern} pointerEvents="none" />
       {headEnd === 'none'
         ? <path d={`M ${end.x} ${end.y} L ${tip.x} ${tip.y}`} fill="none" stroke={color} strokeWidth={3}
           strokeLinecap="round" strokeDasharray={dashPattern} pointerEvents="none" />
         : <path d={`M ${end.x} ${end.y} L ${tip.x} ${tip.y}`} fill="none" stroke="transparent" strokeWidth={3}
-          markerEnd={`url(#board-arrowhead-${color.slice(1)}-${freeMarker ? 'free' : head.side ?? 'free'})`} pointerEvents="none" />}
+          markerEnd={`url(#board-arrowhead-${markerScope}-${color.slice(1)}-${freeMarker ? 'free' : head.side ?? 'free'})`} pointerEvents="none" />}
       {tailEnd === 'arrow' && <path d={`M ${tailShaft.x} ${tailShaft.y} L ${start.x} ${start.y}`}
         fill="none" stroke="transparent" strokeWidth={3}
-        markerEnd={`url(#board-arrowhead-${color.slice(1)}-${freeMarker ? 'free' : tail.side ?? 'free'})`} pointerEvents="none" />}
+        markerEnd={`url(#board-arrowhead-${markerScope}-${color.slice(1)}-${freeMarker ? 'free' : tail.side ?? 'free'})`} pointerEvents="none" />}
       {interactive && <path d={`${path} L ${tip.x} ${tip.y}`} fill="none" stroke="transparent" strokeWidth={16 / view.scale}
         style={{ pointerEvents: 'stroke', cursor: 'pointer' }} onPointerDown={(event) => {
-          event.stopPropagation(); onSelect(id)
+          if (event.button === 0) { event.stopPropagation(); onSelect(id, event.ctrlKey || event.metaKey) }
         }} />}
     </g>
   }
-  return <><svg className="board-arrows" style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.scale})` }}
-    width={BOARD_WIDTH} height={BOARD_HEIGHT} viewBox={`0 0 ${BOARD_WIDTH} ${BOARD_HEIGHT}`}>
-    <defs><mask id="board-arrow-image-mask" maskUnits="userSpaceOnUse" x="0" y="0" width="512" height="512" style={{ maskType: 'alpha' }}>
+  const markerDefs = (scope: string, color: string) => <defs>
+    <mask id={`board-arrow-image-mask-${scope}`} maskUnits="userSpaceOnUse" x="0" y="0" width="512" height="512" style={{ maskType: 'alpha' }}>
       <image href={arrowHeadImage} width="512" height="512" />
-    </mask>{[...new Set([...arrows.map((arrow) => arrow.color), '#272727'])].flatMap((color) =>
-      (['free', 'top', 'right', 'bottom', 'left'] as const).map((side) => <marker key={`${color}-${side}`}
-        id={`board-arrowhead-${color.slice(1)}-${side}`} markerWidth="7" markerHeight="7" viewBox="0 0 512 512" refX="479" refY="256"
-        orient={side === 'free' ? 'auto' : side === 'top' ? '90' : side === 'right' ? '180' : side === 'bottom' ? '270' : '0'} markerUnits="strokeWidth">
-        <rect width="512" height="512" fill={color} mask="url(#board-arrow-image-mask)" />
-      </marker>))}</defs>
-    {arrows.map((arrow) => draw(arrow.id, arrow.tail, arrow.head, arrow.color, true,
-      arrow.dash ?? 'solid', arrow.shape ?? 'curved', arrow.tailEnd ?? 'none', arrow.headEnd ?? 'arrow', geometries.get(arrow.id)!))}
-    {preview && draw('preview', preview.tail, preview.head, '#272727', false, 'solid', 'curved', 'none', 'arrow',
+    </mask>
+    {(['free', 'top', 'right', 'bottom', 'left'] as const).map((side) => <marker key={side}
+      id={`board-arrowhead-${scope}-${color.slice(1)}-${side}`} markerWidth="7" markerHeight="7" viewBox="0 0 512 512" refX="479" refY="256"
+      orient={side === 'free' ? 'auto' : side === 'top' ? '90' : side === 'right' ? '180' : side === 'bottom' ? '270' : '0'} markerUnits="strokeWidth">
+      <rect width="512" height="512" fill={color} mask={`url(#board-arrow-image-mask-${scope})`} />
+    </marker>)}
+  </defs>
+  return <>
+  {arrows.map((arrow, index) => {
+    const scope = `arrow-${index}`
+    return <svg key={arrow.id} className="board-arrows" data-board-object-kind="arrow" data-board-object-id={arrow.id}
+      style={{ zIndex: layers.get(arrow.id) ?? 1 }}
+      width={BOARD_WIDTH} height={BOARD_HEIGHT} viewBox={`0 0 ${BOARD_WIDTH} ${BOARD_HEIGHT}`}>
+      {markerDefs(scope, arrow.color)}
+      {draw(arrow.id, arrow.tail, arrow.head, arrow.color, true,
+        arrow.dash ?? 'solid', arrow.shape ?? 'curved', arrow.tailEnd ?? 'none', arrow.headEnd ?? 'arrow', geometries.get(arrow.id)!, scope,
+        multiSelectedIds.includes(arrow.id))}
+    </svg>
+  })}
+  {preview && <svg className="board-arrows" style={{ zIndex: topLayer }}
+    width={BOARD_WIDTH} height={BOARD_HEIGHT} viewBox={`0 0 ${BOARD_WIDTH} ${BOARD_HEIGHT}`}>
+    {markerDefs('preview', '#272727')}
+    {draw('preview', preview.tail, preview.head, '#272727', false, 'solid', 'curved', 'none', 'arrow',
       arrowGeometry(preview.tail, preview.head,
         initialBend(resolveArrowHead(preview.tail, texts), resolveArrowShaftEnd(preview.tail, preview.head, texts), preview.tail.side, preview.head.side),
-        texts, false, undefined, true))}
-  </svg>
+        texts, false, undefined, true), 'preview')}
+  </svg>}
   {selectedGeometry && <div className="board-arrow-handles" style={{ width: BOARD_WIDTH, height: BOARD_HEIGHT,
-    transform: `translate(${view.x}px, ${view.y}px) scale(${view.scale})` }}>
+    zIndex: topLayer + 1 }}>
     {handle(selectedGeometry.start, 'tail')}
     {handle(selectedGeometry.tip, 'head')}
     {arrows.find((arrow) => arrow.id === selectedId)?.shape === 'straight'

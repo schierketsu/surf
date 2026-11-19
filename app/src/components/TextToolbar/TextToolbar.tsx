@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
+import LayerMenuItems, { type LayerAction } from '../LayerMenuItems'
 import { MAX_FONT_SIZE, MIN_FONT_SIZE, type TextItem } from '../TextBox/TextBox'
 import italicIcon from './icons/coursive.png'
 import boldIcon from './icons/bold.png'
@@ -88,10 +89,11 @@ type TextToolbarProps = {
   onFormat: (command: string) => void
   onColor: (color: string) => void
   onCopy: () => void
+  onLayer: (action: LayerAction) => void
   onDelete: () => void
 }
 
-export default function TextToolbar({ item, items, centerX, top, activeFormatsOverride, onChange, onFormat, onColor, onCopy, onDelete }: TextToolbarProps) {
+export default function TextToolbar({ item, items, centerX, top, activeFormatsOverride, onChange, onFormat, onColor, onCopy, onLayer, onDelete }: TextToolbarProps) {
   const toolbarRef = useRef<HTMLDivElement>(null)
   const [menu, setMenu] = useState<Menu>(null)
   const [sizeInput, setSizeInput] = useState(String(Math.round(item.fontSize)))
@@ -325,6 +327,7 @@ export default function TextToolbar({ item, items, centerX, top, activeFormatsOv
             <button className="text-toolbar__menu-item" type="button" onClick={() => { onCopy(); setMenu(null) }}>
               <span>Копировать</span><span className="text-toolbar__shortcut">Ctrl+C</span>
             </button>
+            <LayerMenuItems onAction={(action) => { onLayer(action); setMenu(null) }} />
             <button className="text-toolbar__menu-item" type="button" onClick={onDelete}>
               <span>Удалить</span><span className="text-toolbar__shortcut">Delete</span>
             </button>

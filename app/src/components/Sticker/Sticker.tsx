@@ -13,6 +13,15 @@ type Gesture = { mode: 'move' | 'corner' | 'edge'; pointerId: number; clientX: n
 const CORNERS: Corner[] = ['top-left', 'top-right', 'bottom-left', 'bottom-right']
 const SIDES: ConnectorSide[] = ['top', 'right', 'bottom', 'left']
 
+function hasStickerText(html: string) {
+  return html
+    .replace(/<br\s*\/?>/gi, '')
+    .replace(/<[^>]*>/g, '')
+    .replace(/&nbsp;|&#160;/gi, '')
+    .replace(/\u00a0/g, '')
+    .trim().length > 0
+}
+
 export type StickerItem = StickerStyle & {
   id: string
   x: number
@@ -31,14 +40,16 @@ export type StickerItem = StickerStyle & {
 type Props = {
   item: StickerItem
   selected: boolean
+  groupSelected: boolean
   interactive: boolean
   editing: boolean
   focusOnMount: boolean
   scale: number
+  layer: number
   showConnectors: boolean
   occupiedSides: ConnectorSide[]
   snapSide: ConnectorSide | null
-  onSelect: (id: string) => void
+  onSelect: (id: string, additive?: boolean) => void
   onEdit: (id: string) => void
   onChange: (id: string, changes: Partial<StickerItem>) => void
   onEditorRef: (id: string, node: HTMLDivElement | null) => void
@@ -46,10 +57,11 @@ type Props = {
   onConnectorStart: (id: string, side: ConnectorSide, client: { x: number; y: number }, pointerId: number) => void
 }
 
-export default function Sticker({ item, selected, interactive, editing, focusOnMount, scale, showConnectors, occupiedSides, snapSide,
+export default function Sticker({ item, selected, groupSelected, interactive, editing, focusOnMount, scale, layer, showConnectors, occupiedSides, snapSide,
   onSelect, onEdit, onChange, onEditorRef, onSaveSelection, onConnectorStart }: Props) {
   const gesture = useRef<Gesture | null>(null)
   const editorRef = useRef<HTMLDivElement | null>(null)
+  const empty = !hasStickerText(item.html)
 
   const fitText = () => {
     const editor = editorRef.current
@@ -91,9 +103,12 @@ export default function Sticker({ item, selected, interactive, editing, focusOnM
   }, [focusOnMount])
 
   const startGesture = (event: React.PointerEvent<HTMLButtonElement>, mode: Gesture['mode'], corner?: Corner, edge?: ConnectorSide) => {
+    if (event.button !== 0) return
     event.preventDefault()
     event.stopPropagation()
-    onSelect(item.id)
+    const additive = event.ctrlKey || event.metaKey
+    onSelect(item.id, additive)
+    if (additive) return
     gesture.current = { mode, corner, edge, pointerId: event.pointerId, clientX: event.clientX, clientY: event.clientY, start: { ...item } }
     event.currentTarget.setPointerCapture(event.pointerId)
   }
@@ -156,11 +171,13 @@ export default function Sticker({ item, selected, interactive, editing, focusOnM
   const finishGesture = () => { gesture.current = null }
 
   return <div className={`board-sticker${selected ? ' board-sticker--selected' : ''}`}
+    data-board-object-kind="sticker" data-board-object-id={item.id}
     aria-label={`${item.name} стикер`}
-    style={{ left: item.x, top: item.y, width: item.width, height: item.height, backgroundColor: item.fill,
+    style={{ left: item.x, top: item.y, width: item.width, height: item.height, backgroundColor: item.fill, zIndex: layer,
       '--handle-inverse-scale': 1 / scale,
       '--handle-screen-size': `${Math.max(6, Math.min(18, 6 * scale))}px` } as CSSProperties}>
-    <div ref={(node) => { editorRef.current = node; onEditorRef(item.id, node) }} className="board-sticker__editor"
+    <div ref={(node) => { editorRef.current = node; onEditorRef(item.id, node) }}
+      className={`board-sticker__editor${empty ? ' board-sticker__editor--empty' : ''}`}
       contentEditable={interactive && editing} suppressContentEditableWarning spellCheck={false}
       tabIndex={interactive && editing ? 0 : -1} role="textbox" aria-label="Текст стикера" aria-multiline="true"
       style={{ fontSize: item.fontSize, textAlign: item.align, fontWeight: item.bold ? 700 : undefined,
@@ -168,26 +185,29 @@ export default function Sticker({ item, selected, interactive, editing, focusOnM
         textDecoration: [item.underline && 'underline', item.strikeThrough && 'line-through'].filter(Boolean).join(' ') || undefined }}
       onPointerDown={(event) => { if (editing) event.stopPropagation() }}
       onInput={(event) => {
-        onChange(item.id, { html: event.currentTarget.innerHTML })
+        const html = event.currentTarget.textContent?.replace(/\u00a0/g, '').trim()
+          ? event.currentTarget.innerHTML : ''
+        onChange(item.id, { html })
         requestAnimationFrame(fitText)
       }}
-      onFocus={() => onSelect(item.id)}
-      onBlur={(event) => onChange(item.id, { html: event.currentTarget.innerHTML })}
+      onFocus={() => { if (interactive) onSelect(item.id) }}
+      onBlur={(event) => onChange(item.id, { html: event.currentTarget.textContent?.replace(/\u00a0/g, '').trim()
+        ? event.currentTarget.innerHTML : '' })}
       onKeyDown={(event) => { if (event.key === 'Escape') event.currentTarget.blur() }}
       onKeyUp={onSaveSelection} onMouseUp={onSaveSelection} />
     {interactive && !editing && <button type="button" className="board-sticker__body" aria-label="Переместить стикер"
       onPointerDown={(event) => startGesture(event, 'move')} onPointerMove={continueGesture}
       onPointerUp={finishGesture} onPointerCancel={finishGesture}
       onDoubleClick={(event) => { event.preventDefault(); event.stopPropagation(); onEdit(item.id) }} />}
-    {selected && SIDES.map((side) => <button key={`edge-${side}`} type="button"
+    {selected && !groupSelected && SIDES.map((side) => <button key={`edge-${side}`} type="button"
       className={`text-box__drag-area text-box__drag-area--${side}`} aria-label={`Изменить размер стикера: ${side} сторона`}
       onPointerDown={(event) => startGesture(event, 'edge', undefined, side)} onPointerMove={continueGesture}
       onPointerUp={finishGesture} onPointerCancel={finishGesture} />)}
-    {selected && CORNERS.map((corner) => <button key={corner} type="button"
+    {selected && !groupSelected && CORNERS.map((corner) => <button key={corner} type="button"
       className={`text-box__handle text-box__handle--${corner}`} aria-label={`Масштабировать стикер: ${corner} угол`}
       onPointerDown={(event) => startGesture(event, 'corner', corner)} onPointerMove={continueGesture}
       onPointerUp={finishGesture} onPointerCancel={finishGesture}><HandleDot kind="resize" /></button>)}
-    {interactive && (selected || showConnectors) && SIDES.filter((side) => !occupiedSides.includes(side)).map((side) =>
+    {interactive && !groupSelected && (selected || showConnectors) && SIDES.filter((side) => !occupiedSides.includes(side)).map((side) =>
       <button key={`connector-${side}`} type="button"
         className={`text-box__midpoint text-box__midpoint--${side}${snapSide === side ? ' text-box__midpoint--snap' : ''}`}
         aria-label={`Начать стрелку от стикера: ${side} сторона`}

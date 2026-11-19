@@ -39,19 +39,24 @@ export function drawingPath(points: Point[]) {
 type Props = {
   item: DrawingItem
   selected: boolean
+  groupSelected: boolean
   interactive: boolean
   scale: number
-  onSelect: (id: string) => void
+  layer: number
+  onSelect: (id: string, additive?: boolean) => void
   onChange: (id: string, changes: Partial<DrawingItem>) => void
 }
 
-export default function Drawing({ item, selected, interactive, scale, onSelect, onChange }: Props) {
+export default function Drawing({ item, selected, groupSelected, interactive, scale, layer, onSelect, onChange }: Props) {
   const gesture = useRef<Gesture | null>(null)
 
   const startGesture = (event: ReactPointerEvent<HTMLButtonElement>, mode: Gesture['mode'], corner?: Corner) => {
+    if (event.button !== 0) return
     event.preventDefault()
     event.stopPropagation()
-    onSelect(item.id)
+    const additive = event.ctrlKey || event.metaKey
+    onSelect(item.id, additive)
+    if (additive) return
     gesture.current = { mode, corner, pointerId: event.pointerId, clientX: event.clientX,
       clientY: event.clientY, start: { ...item, points: item.points.map((point) => ({ ...point })) } }
     event.currentTarget.setPointerCapture(event.pointerId)
@@ -99,10 +104,11 @@ export default function Drawing({ item, selected, interactive, scale, onSelect, 
   const finishGesture = () => { gesture.current = null }
 
   return <div className={`board-drawing${selected ? ' board-drawing--selected' : ''}`}
-    style={{ left: item.x, top: item.y, width: item.width, height: item.height,
+    data-board-object-kind="drawing" data-board-object-id={item.id}
+    style={{ left: item.x, top: item.y, width: item.width, height: item.height, zIndex: layer,
       '--handle-inverse-scale': 1 / scale,
       '--handle-screen-size': `${Math.max(6, Math.min(18, 6 * scale))}px` } as CSSProperties}
-    onPointerDown={(event) => { event.stopPropagation(); if (interactive) onSelect(item.id) }}>
+    onPointerDown={(event) => { if (event.button === 0) { event.stopPropagation(); if (interactive) onSelect(item.id, event.ctrlKey || event.metaKey) } }}>
     <svg className="board-drawing__stroke" width="100%" height="100%"
       viewBox={`0 0 ${item.width} ${item.height}`} preserveAspectRatio="none" aria-hidden="true">
       <path d={drawingPath(item.points)} fill="none" stroke={item.color} strokeWidth={item.strokeWidth}
@@ -111,7 +117,7 @@ export default function Drawing({ item, selected, interactive, scale, onSelect, 
     {interactive && <button type="button" className="board-drawing__body" aria-label="Переместить рисунок"
       onPointerDown={(event) => startGesture(event, 'move')} onPointerMove={continueGesture}
       onPointerUp={finishGesture} onPointerCancel={finishGesture} />}
-    {selected && interactive && CORNERS.map((corner) => <button key={corner} type="button"
+    {selected && !groupSelected && interactive && CORNERS.map((corner) => <button key={corner} type="button"
       className={`text-box__handle text-box__handle--${corner}`} aria-label={`Масштабировать рисунок: ${corner}`}
       onPointerDown={(event) => startGesture(event, 'resize', corner)} onPointerMove={continueGesture}
       onPointerUp={finishGesture} onPointerCancel={finishGesture}><HandleDot kind="resize" /></button>)}

@@ -163,8 +163,14 @@ h6 {
 }
 
 .board--hand .text-box,
-.board--hand .text-box * {
-  pointer-events: none;
+.board--hand .text-box *,
+.board--hand .board-sticker,
+.board--hand .board-sticker *,
+.board--hand .board-drawing,
+.board--hand .board-drawing *,
+.board--hand .board-arrows *,
+.board--hand .board-arrow-handles * {
+  pointer-events: none !important;
 }
 
 .board-selection {
@@ -174,5 +180,50 @@ h6 {
   border: 1px solid #0057ff;
   background: rgb(0 87 255 / 12%);
   pointer-events: none;
+}
+
+.board-context-menu {
+  position: fixed;
+  z-index: 50;
+  display: grid;
+  width: 218px;
+  padding: 8px;
+  border: 1px solid rgb(39 39 39 / 8%);
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 8px 24px rgb(39 39 39 / 16%);
+  color: #2f3b4d;
+  font: 16px/1.2 'Doska', Arial, sans-serif;
+}
+
+.board-context-menu button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 36px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.board-context-menu button:hover { background: #eef3f7; }
+
+.board-context-menu button:disabled {
+  background: transparent;
+  color: #aeb5c0;
+  cursor: default;
+}
+
+.board-context-menu__shortcut { color: #778397; }
+
+.board-context-menu__divider {
+  height: 1px;
+  margin: 4px -8px;
+  background: #e7e9ed;
 }
 

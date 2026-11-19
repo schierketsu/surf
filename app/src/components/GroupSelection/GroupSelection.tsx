@@ -1,11 +1,20 @@
 import { useRef } from 'react'
 import { BOARD_WIDTH } from '../../gridHierarchy'
-import { MAX_FONT_SIZE, MIN_FONT_SIZE, MIN_TEXT_HEIGHT, MIN_TEXT_WIDTH, type TextItem } from '../TextBox/TextBox'
+import { MAX_FONT_SIZE, MIN_FONT_SIZE, MIN_TEXT_HEIGHT, MIN_TEXT_WIDTH } from '../TextBox/TextBox'
 import './GroupSelection.css'
 
 type Corner = 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right'
 type Edge = 'top' | 'right' | 'bottom' | 'left'
 type Bounds = { left: number; top: number; right: number; bottom: number }
+export type GroupSelectionItem = {
+  id: string
+  kind: 'text' | 'sticker' | 'drawing' | 'arrow'
+  x: number
+  y: number
+  width: number
+  height: number
+  fontSize?: number
+}
 type Gesture = {
   pointerId: number
   corner?: Corner
@@ -13,17 +22,19 @@ type Gesture = {
   clientX: number
   clientY: number
   bounds: Bounds
-  items: TextItem[]
+  items: GroupSelectionItem[]
 }
-type MoveGesture = { pointerId: number; clientX: number; clientY: number; items: TextItem[] }
+type MoveGesture = { pointerId: number; clientX: number; clientY: number; items: GroupSelectionItem[] }
 
 type GroupSelectionProps = {
-  items: TextItem[]
+  items: GroupSelectionItem[]
   view: { x: number; y: number; scale: number }
   minY: number
   maxY: number
-  onMove: (items: TextItem[], dx: number, dy: number) => void
-  onScale: (items: TextItem[], anchorX: number, anchorY: number, factor: number) => void
+  onToggle: (id: string) => void
+  onTransformStart: () => void
+  onMove: (items: GroupSelectionItem[], dx: number, dy: number) => void
+  onScale: (items: GroupSelectionItem[], anchorX: number, anchorY: number, factor: number) => void
 }
 
 const CORNERS = [
@@ -40,7 +51,7 @@ const EDGES = [
   { edge: 'left', label: 'левая' },
 ] as const
 
-function getBounds(items: TextItem[]): Bounds {
+function getBounds(items: GroupSelectionItem[]): Bounds {
   return {
     left: Math.min(...items.map((item) => item.x)),
     top: Math.min(...items.map((item) => item.y)),
@@ -49,7 +60,7 @@ function getBounds(items: TextItem[]): Bounds {
   }
 }
 
-export default function GroupSelection({ items, view, minY, maxY, onMove, onScale }: GroupSelectionProps) {
+export default function GroupSelection({ items, view, minY, maxY, onToggle, onTransformStart, onMove, onScale }: GroupSelectionProps) {
   const gesture = useRef<Gesture | null>(null)
   const moveGesture = useRef<MoveGesture | null>(null)
   const bounds = getBounds(items)
@@ -59,11 +70,20 @@ export default function GroupSelection({ items, view, minY, maxY, onMove, onScal
     width: (bounds.right - bounds.left) * view.scale,
     height: (bounds.bottom - bounds.top) * view.scale,
   }
-  const handleScale = view.scale * items.reduce((sum, item) => sum + item.fontSize / MIN_FONT_SIZE, 0) / items.length
+  const handleScale = view.scale * items.reduce((sum, item) => sum
+    + (item.kind === 'text' && item.fontSize ? item.fontSize / MIN_FONT_SIZE : 1), 0) / items.length
 
   const startMove = (event: React.PointerEvent<HTMLButtonElement>) => {
     event.preventDefault()
     event.stopPropagation()
+    if (event.ctrlKey || event.metaKey) {
+      const object = document.elementsFromPoint(event.clientX, event.clientY)
+        .map((element) => element.closest<HTMLElement>('[data-board-object-id]'))
+        .find((element): element is HTMLElement => Boolean(element?.dataset.boardObjectId))
+      if (object?.dataset.boardObjectId) onToggle(object.dataset.boardObjectId)
+      return
+    }
+    onTransformStart()
     moveGesture.current = {
       pointerId: event.pointerId, clientX: event.clientX, clientY: event.clientY,
       items: items.map((item) => ({ ...item })),
@@ -86,6 +106,7 @@ export default function GroupSelection({ items, view, minY, maxY, onMove, onScal
   const startScale = (event: React.PointerEvent<HTMLButtonElement>, corner?: Corner, edge?: Edge) => {
     event.preventDefault()
     event.stopPropagation()
+    onTransformStart()
     gesture.current = {
       pointerId: event.pointerId, corner, edge, clientX: event.clientX, clientY: event.clientY,
       bounds, items: items.map((item) => ({ ...item })),
@@ -119,11 +140,13 @@ export default function GroupSelection({ items, view, minY, maxY, onMove, onScal
       requestedFactor = 1 + (dx * (fromLeft ? -1 : 1) * width + dy * (fromTop ? -1 : 1) * height)
         / (width ** 2 + height ** 2)
     }
-    const minFactor = Math.max(...start.items.map((item) => Math.max(
-      MIN_FONT_SIZE / item.fontSize, MIN_TEXT_WIDTH / item.width, MIN_TEXT_HEIGHT / item.height,
-    )))
+    const minFactor = Math.max(...start.items.map((item) => item.kind === 'text' && item.fontSize
+      ? Math.max(MIN_FONT_SIZE / item.fontSize, MIN_TEXT_WIDTH / item.width, MIN_TEXT_HEIGHT / item.height)
+      : item.kind === 'sticker' ? Math.max(56 / item.width, 56 / item.height)
+        : item.kind === 'drawing' ? Math.max(2 / item.width, 2 / item.height)
+          : .05))
     const maxFactor = Math.min(
-      ...start.items.map((item) => MAX_FONT_SIZE / item.fontSize),
+      ...start.items.map((item) => item.kind === 'text' && item.fontSize ? MAX_FONT_SIZE / item.fontSize : Infinity),
       anchorX > start.bounds.left ? anchorX / (anchorX - start.bounds.left) : Infinity,
       anchorX < start.bounds.right ? (BOARD_WIDTH - anchorX) / (start.bounds.right - anchorX) : Infinity,
       anchorY > start.bounds.top ? (anchorY - minY) / (anchorY - start.bounds.top) : Infinity,
@@ -148,17 +171,16 @@ export default function GroupSelection({ items, view, minY, maxY, onMove, onScal
       '--connector-scale': view.scale * Math.sqrt(handleScale / view.scale) } as React.CSSProperties}>
       {EDGES.map(({ edge, label }) => <button key={edge} type="button"
         className={`group-selection__drag-area group-selection__drag-area--${edge}`}
-        aria-label={`Масштабировать выделенные тексты: ${label} граница`}
-        title="Масштабировать выделенные тексты"
+        aria-label={`Масштабировать выделенные объекты: ${label} граница`}
+        title="Масштабировать выделенные объекты"
         onPointerDown={(event) => startScale(event, undefined, edge)}
         onPointerMove={continueScale}
         onPointerUp={endScale}
         onPointerCancel={endScale} />)}
-      {EDGES.map(({ edge }) => <span key={edge} className={`group-selection__midpoint group-selection__midpoint--${edge}`} aria-hidden="true" />)}
       {CORNERS.map(({ corner, label }) => <button key={corner} type="button"
         className={`group-selection__handle group-selection__handle--${corner}`}
-        aria-label={`Масштабировать выделенные тексты: ${label} угол`}
-        title="Масштабировать выделенные тексты"
+        aria-label={`Масштабировать выделенные объекты: ${label} угол`}
+        title="Масштабировать выделенные объекты"
         onPointerDown={(event) => startScale(event, corner)}
         onPointerMove={continueScale}
         onPointerUp={endScale}

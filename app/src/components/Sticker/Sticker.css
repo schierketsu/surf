@@ -31,9 +31,15 @@
   overflow-wrap: anywhere;
 }
 
-.board-sticker__editor:empty {
+.board-sticker__editor--empty {
   display: block;
-  padding-top: calc(50% - .625em);
+  position: absolute;
+  top: 50%;
+  right: 16px;
+  left: 16px;
+  width: auto;
+  height: 1.25em;
+  transform: translateY(-50%);
 }
 
 .board-sticker__body {

@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import LayerMenuItems, { type LayerAction } from '../LayerMenuItems'
 import { TEXT_COLORS } from '../TextToolbar/TextToolbar'
 import moreIcon from '../TextToolbar/icons/dots.png'
 import arrowBarIcon from './icons/arrow_bar.png'
@@ -10,7 +11,8 @@ import './ArrowToolbar.css'
 type Props = { color: string; shape: ArrowShape; dash: ArrowDash; tailEnd: ArrowEnd; headEnd: ArrowEnd;
   left: number; top: number; onColor: (color: string) => void; onShape: (shape: ArrowShape) => void;
   onDash: (dash: ArrowDash) => void; onTailEnd: (end: ArrowEnd) => void;
-  onHeadEnd: (end: ArrowEnd) => void; onSwapEnds: () => void; onDelete: () => void }
+  onHeadEnd: (end: ArrowEnd) => void; onSwapEnds: () => void;
+  onLayer: (action: LayerAction) => void; onDelete: () => void }
 
 const shapes: { value: ArrowShape; label: string; path: string }[] = [
   { value: 'straight', label: 'Прямая', path: 'M 5 22 L 35 12' },
@@ -39,7 +41,7 @@ function EndIcon({ end, position }: { end: ArrowEnd; position: 'tail' | 'head' }
 }
 
 export default function ArrowToolbar({ color, shape, dash, tailEnd, headEnd, left, top, onColor, onShape,
-  onDash, onTailEnd, onHeadEnd, onSwapEnds, onDelete }: Props) {
+  onDash, onTailEnd, onHeadEnd, onSwapEnds, onLayer, onDelete }: Props) {
   const [menu, setMenu] = useState<'tail' | 'head' | 'color' | 'style' | 'more' | null>(null)
   const toggleMenu = (next: typeof menu) => setMenu((current) => current === next ? null : next)
   return <div className="arrow-toolbar"
@@ -111,6 +113,7 @@ export default function ArrowToolbar({ color, shape, dash, tailEnd, headEnd, lef
         <img className="text-toolbar__asset-icon text-toolbar__asset-icon--more" src={moreIcon} alt="" aria-hidden="true" />
       </button>
       {menu === 'more' && <div className="text-toolbar__popover text-toolbar__popover--more" role="group" aria-label="Дополнительные действия">
+        <LayerMenuItems onAction={(action) => { onLayer(action); setMenu(null) }} />
         <button className="text-toolbar__menu-item" type="button" onClick={onDelete}>
           <span>Удалить</span><span className="text-toolbar__shortcut">Delete</span>
         </button>

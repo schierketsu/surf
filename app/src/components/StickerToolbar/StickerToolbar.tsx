@@ -1,4 +1,5 @@
 import { useLayoutEffect, useRef, useState } from 'react'
+import LayerMenuItems, { type LayerAction } from '../LayerMenuItems'
 import type { StickerItem } from '../Sticker/Sticker'
 import { STICKER_COLORS } from '../ToolPanel/ToolPanel'
 import boldIcon from '../TextToolbar/icons/bold.png'
@@ -23,10 +24,11 @@ type Props = {
   onChange: (changes: Partial<StickerItem>) => void
   onFormat: (command: Format) => void
   onCopy: () => void
+  onLayer: (action: LayerAction) => void
   onDelete: () => void
 }
 
-export default function StickerToolbar({ item, centerX, top, onChange, onFormat, onCopy, onDelete }: Props) {
+export default function StickerToolbar({ item, centerX, top, onChange, onFormat, onCopy, onLayer, onDelete }: Props) {
   const toolbarRef = useRef<HTMLDivElement>(null)
   const [toolbarWidth, setToolbarWidth] = useState(0)
   const [menu, setMenu] = useState<Menu>(null)
@@ -110,6 +112,7 @@ export default function StickerToolbar({ item, centerX, top, onChange, onFormat,
           onClick={() => toggleMenu('more')}><img className="text-toolbar__asset-icon text-toolbar__asset-icon--more" src={moreIcon} alt="" aria-hidden="true" /></button>
         {menu === 'more' && <div className="text-toolbar__popover text-toolbar__popover--more" role="group" aria-label="Дополнительные действия">
           <button className="text-toolbar__menu-item" type="button" onClick={() => { onCopy(); setMenu(null) }}><span>Копировать</span><span className="text-toolbar__shortcut">Ctrl+C</span></button>
+          <LayerMenuItems onAction={(action) => { onLayer(action); setMenu(null) }} />
           <button className="text-toolbar__menu-item" type="button" onClick={() => { onDelete(); setMenu(null) }}><span>Удалить</span><span className="text-toolbar__shortcut">Del</span></button>
         </div>}
       </div>

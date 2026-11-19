@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react'
+import LayerMenuItems, { type LayerAction } from '../LayerMenuItems'
 import { TEXT_COLORS } from '../TextToolbar/TextToolbar'
 import moreIcon from '../TextToolbar/icons/dots.png'
 import './DrawingToolbar.css'
@@ -10,10 +11,12 @@ type Props = {
   top: number
   onColor: (color: string) => void
   onWidth: (width: number) => void
+  onCopy: () => void
+  onLayer: (action: LayerAction) => void
   onDelete: () => void
 }
 
-export default function DrawingToolbar({ color, width, centerX, top, onColor, onWidth, onDelete }: Props) {
+export default function DrawingToolbar({ color, width, centerX, top, onColor, onWidth, onCopy, onLayer, onDelete }: Props) {
   const rootRef = useRef<HTMLDivElement>(null)
   const [toolbarWidth, setToolbarWidth] = useState(0)
   const [menu, setMenu] = useState<'color' | 'more' | null>(null)
@@ -74,6 +77,10 @@ export default function DrawingToolbar({ color, width, centerX, top, onColor, on
         </button>
         {menu === 'more' && <div className="text-toolbar__popover text-toolbar__popover--more"
           role="group" aria-label="Дополнительные действия">
+          <button className="text-toolbar__menu-item" type="button" onClick={() => { setMenu(null); onCopy() }}>
+            <span>Копировать</span><span className="text-toolbar__shortcut">Ctrl+C</span>
+          </button>
+          <LayerMenuItems onAction={(action) => { onLayer(action); setMenu(null) }} />
           <button className="text-toolbar__menu-item" type="button" onClick={() => { setMenu(null); onDelete() }}>
             <span>Удалить</span><span className="text-toolbar__shortcut">Delete</span>
           </button>

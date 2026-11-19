@@ -27,6 +27,28 @@ const EDGES = [
   { edge: 'left', label: 'левая' },
 ] as const
 
+const OBJECT_CLIPBOARD_PREFIX = 'DOSKA_OBJECTS_V1:'
+
+function htmlToPlainText(html: string) {
+  const container = document.createElement('div')
+  container.innerHTML = html
+  return container.innerText || container.textContent || ''
+}
+
+function normalizePastedText(value: string) {
+  if (!value.startsWith(OBJECT_CLIPBOARD_PREFIX)) return value
+  try {
+    const payload = JSON.parse(value.slice(OBJECT_CLIPBOARD_PREFIX.length)) as { version?: number; texts?: { html?: unknown }[] }
+    if (payload.version !== 1 || !Array.isArray(payload.texts)) return value
+    return payload.texts
+      .filter((item): item is { html: string } => typeof item?.html === 'string')
+      .map((item) => htmlToPlainText(item.html))
+      .join('\n')
+  } catch {
+    return value
+  }
+}
+
 export type TextItem = {
   id: string
   x: number
@@ -56,9 +78,10 @@ type TextBoxProps = {
   editing: boolean
   focusOnMount: boolean
   scale: number
+  layer: number
   minY: number
   maxY: number
-  onSelect: (id: string) => void
+  onSelect: (id: string, additive?: boolean) => void
   onEdit: (id: string) => void
   onChange: (id: string, changes: Partial<TextItem>) => void
   onCommit: (id: string, html: string, isEmpty: boolean) => void
@@ -71,7 +94,7 @@ type TextBoxProps = {
   onConnectorStart: (id: string, side: ConnectorSide, client: { x: number; y: number }, pointerId: number) => void
 }
 
-export default function TextBox({ item, selected, groupSelected, interactive, editing, focusOnMount, scale, minY, maxY, onSelect, onEdit, onChange, onCommit, onDismiss, onEditorRef, onSaveSelection, showConnectors, occupiedSides, snapSide, onConnectorStart }: TextBoxProps) {
+export default function TextBox({ item, selected, groupSelected, interactive, editing, focusOnMount, scale, layer, minY, maxY, onSelect, onEdit, onChange, onCommit, onDismiss, onEditorRef, onSaveSelection, showConnectors, occupiedSides, snapSide, onConnectorStart }: TextBoxProps) {
   const editorRef = useRef<HTMLDivElement | null>(null)
   const gesture = useRef<Gesture | null>(null)
   const focusPoint = useRef<{ x: number; y: number } | null>(null)
@@ -183,9 +206,12 @@ export default function TextBox({ item, selected, groupSelected, interactive, ed
   }, [focusOnMount])
 
   const startGesture = (event: React.PointerEvent<HTMLButtonElement>, mode: 'move' | 'resize', corner?: Corner, edge?: Edge) => {
+    if (event.button !== 0) return
     event.preventDefault()
     event.stopPropagation()
-    if (!groupSelected || mode !== 'move') onSelect(item.id)
+    const additive = event.ctrlKey || event.metaKey
+    if (!groupSelected || mode !== 'move') onSelect(item.id, additive)
+    if (additive) return
     gesture.current = { mode, pointerId: event.pointerId, corner, edge, clientX: event.clientX, clientY: event.clientY,
       start: { ...item }, contentWidth: lastMeasuredWidth.current ?? item.width,
       contentHeight: lastMeasuredHeight.current ?? item.height, wasSelected: selected && !groupSelected, moved: false }
@@ -255,10 +281,11 @@ export default function TextBox({ item, selected, groupSelected, interactive, ed
   return (
     <div
       className={`text-box${selected ? ' text-box--selected' : ''}`}
-      style={{ left: item.x, top: item.y, width: item.width, height: item.height, opacity: item.opacity,
+      data-board-object-kind="text" data-board-object-id={item.id}
+      style={{ left: item.x, top: item.y, width: item.width, height: item.height, opacity: item.opacity, zIndex: layer,
         backgroundColor: item.highlight, '--handle-inverse-scale': 1 / scale,
         '--handle-screen-size': `${Math.max(6, Math.min(18, 6 * scale))}px` } as CSSProperties}
-      onPointerDown={(event) => { event.stopPropagation(); onSelect(item.id) }}
+      onPointerDown={(event) => { if (event.button === 0) { event.stopPropagation(); onSelect(item.id, event.ctrlKey || event.metaKey) } }}
     >
       <div
         ref={(node) => { editorRef.current = node; onEditorRef(item.id, node) }}
@@ -295,7 +322,7 @@ export default function TextBox({ item, selected, groupSelected, interactive, ed
         onDrop={(event) => event.preventDefault()}
         onPaste={(event) => {
           event.preventDefault()
-          const content = event.clipboardData.getData('text/plain')
+          const content = normalizePastedText(event.clipboardData.getData('text/plain'))
           const selection = window.getSelection()
           if (!selection?.rangeCount) return
           const range = selection.getRangeAt(0)

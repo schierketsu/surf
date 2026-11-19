@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import ToolPanel, { STICKER_DRAG_TYPE, type DrawingStyle, type NavigationMode, type StickerStyle } from './components/ToolPanel/ToolPanel'
 import ZoomControls from './components/ZoomControls/ZoomControls'
 import TextBox, { MAX_FONT_SIZE, MIN_FONT_SIZE, MIN_TEXT_HEIGHT, MIN_TEXT_WIDTH, type TextItem } from './components/TextBox/TextBox'
-import GroupSelection from './components/GroupSelection/GroupSelection'
+import GroupSelection, { type GroupSelectionItem } from './components/GroupSelection/GroupSelection'
 import TextToolbar from './components/TextToolbar/TextToolbar'
 import { BOARD_HEIGHT, BOARD_WIDTH, MINI_CELLS_PER_SIDE, gridLevelForScale, visitVisibleCells, type WorldRect } from './gridHierarchy'
 import ArrowLayer, { anchorPoint, arrowGeometry, arrowTarget, bendOffsetFor, initialBend, resolveArrowHead, resolveArrowShaftEnd, type Anchor, type Arrow, type ArrowDrag, type ConnectableItem, type Point } from './ArrowLayer'
@@ -12,11 +12,15 @@ import Sticker, { type StickerItem } from './components/Sticker/Sticker'
 import StickerToolbar from './components/StickerToolbar/StickerToolbar'
 import Drawing, { drawingPath, type DrawingItem } from './components/Drawing/Drawing'
 import DrawingToolbar from './components/DrawingToolbar/DrawingToolbar'
+import type { LayerAction } from './components/LayerMenuItems'
 
 type View = { scale: number; x: number; y: number }
 type SelectionRect = { left: number; top: number; width: number; height: number }
+type BoardObjectKind = 'text' | 'sticker' | 'drawing' | 'arrow'
+type BoardContextMenu = { x: number; y: number; objectKind?: BoardObjectKind; objectId?: string }
 type FormatCommand = 'bold' | 'italic' | 'underline' | 'strikeThrough'
 type DrawingDraft = DrawingStyle & { points: Point[] }
+type GroupTransformSnapshot = { texts: TextItem[]; stickers: StickerItem[]; drawings: DrawingItem[]; arrows: Arrow[] }
 
 const MAX_SCALE = 4
 const WHEEL_ZOOM_SENSITIVITY = 0.002
@@ -29,7 +33,7 @@ const ARROW_DRAG_THRESHOLD = 6
 const OBJECT_CLIPBOARD_TYPE = 'application/x-doska-objects+json'
 const OBJECT_CLIPBOARD_PREFIX = 'DOSKA_OBJECTS_V1:'
 
-type ObjectClipboard = { version: 1; texts: TextItem[]; arrows: Arrow[] }
+type ObjectClipboard = { version: 1; texts: TextItem[]; stickers: StickerItem[]; arrows: Arrow[]; drawings: DrawingItem[] }
 function occupiedConnectorKeys(items: Arrow[], exceptArrowId?: string) {
   const occupied = new Set<string>()
   for (const arrow of items) {
@@ -43,8 +47,68 @@ function occupiedConnectorKeys(items: Arrow[], exceptArrowId?: string) {
 function parseObjectClipboard(value: string): ObjectClipboard | null {
   try {
     const data = JSON.parse(value.startsWith(OBJECT_CLIPBOARD_PREFIX) ? value.slice(OBJECT_CLIPBOARD_PREFIX.length) : value)
-    return data?.version === 1 && Array.isArray(data.texts) && Array.isArray(data.arrows) ? data as ObjectClipboard : null
+    return data?.version === 1 && Array.isArray(data.texts) && Array.isArray(data.arrows)
+      ? { ...data, stickers: Array.isArray(data.stickers) ? data.stickers : [],
+        drawings: Array.isArray(data.drawings) ? data.drawings : [] } as ObjectClipboard
+      : null
   } catch { return null }
+}
+
+function htmlToPlainText(html: string) {
+  const container = document.createElement('div')
+  container.innerHTML = html
+  return container.innerText || container.textContent || ''
+}
+
+function objectClipboardPlainText(payload: ObjectClipboard) {
+  return [...payload.texts, ...payload.stickers].map((item) => htmlToPlainText(item.html)).join('\n')
+}
+
+function normalizeLayerOrder(order: string[], objectIds: string[]) {
+  const existing = new Set(objectIds)
+  const normalized = order.filter((id) => existing.has(id))
+  const known = new Set(normalized)
+  objectIds.forEach((id) => { if (!known.has(id)) normalized.push(id) })
+  return normalized
+}
+
+function reorderLayers(order: string[], selectedIds: string[], action: LayerAction) {
+  const selected = new Set(selectedIds)
+  if (!selected.size) return order
+  const selectedInOrder = order.filter((id) => selected.has(id))
+  const rest = order.filter((id) => !selected.has(id))
+  if (action === 'front') return [...rest, ...selectedInOrder]
+  if (action === 'back') return [...selectedInOrder, ...rest]
+
+  const next = [...order]
+  if (action === 'forward') {
+    for (let index = next.length - 2; index >= 0; index -= 1) {
+      if (selected.has(next[index]) && !selected.has(next[index + 1])) {
+        const following = next[index + 1]
+        next[index + 1] = next[index]
+        next[index] = following
+      }
+    }
+  } else {
+    for (let index = 1; index < next.length; index += 1) {
+      if (selected.has(next[index]) && !selected.has(next[index - 1])) {
+        const preceding = next[index - 1]
+        next[index - 1] = next[index]
+        next[index] = preceding
+      }
+    }
+  }
+  return next
+}
+
+function arrowSelectionBounds(geometry: ReturnType<typeof arrowGeometry>, padding: number) {
+  const points = [geometry.start, geometry.end, geometry.tip, geometry.handle,
+    ...('bendHandles' in geometry && geometry.bendHandles ? geometry.bendHandles : [])]
+  const minX = Math.min(...points.map((point) => point.x))
+  const maxX = Math.max(...points.map((point) => point.x))
+  const minY = Math.min(...points.map((point) => point.y))
+  const maxY = Math.max(...points.map((point) => point.y))
+  return { x: minX - padding, y: minY - padding, width: maxX - minX + padding * 2, height: maxY - minY + padding * 2 }
 }
 
 function visibleVerticalBounds(view: View | null, viewportHeight: number) {
@@ -176,8 +240,11 @@ export default function BoardCanvas() {
   const drawingModeRef = useRef<DrawingStyle | null>(null)
   const navigationModeRef = useRef<NavigationMode>('cursor')
   const textsRef = useRef<TextItem[]>([])
+  const stickersRef = useRef<StickerItem[]>([])
+  const drawingsRef = useRef<DrawingItem[]>([])
   const connectableItemsRef = useRef<ConnectableItem[]>([])
   const arrowsRef = useRef<Arrow[]>([])
+  const arrowGeometriesRef = useRef(new Map<string, ReturnType<typeof arrowGeometry>>())
   const arrowDragRef = useRef<ArrowDrag | null>(null)
   const selectedIdRef = useRef<string | null>(null)
   const editorRefs = useRef(new Map<string, HTMLDivElement>())
@@ -185,6 +252,8 @@ export default function BoardCanvas() {
   const selectionRef = useRef<Range | null>(null)
   const stickerSelectionRef = useRef<Range | null>(null)
   const pasteCountRef = useRef(0)
+  const objectClipboardRef = useRef<ObjectClipboard | null>(null)
+  const groupTransformStartRef = useRef<GroupTransformSnapshot | null>(null)
   const arrowGeometryCacheRef = useRef(new Map<string, {
     arrow: Arrow
     textKey: string
@@ -209,11 +278,39 @@ export default function BoardCanvas() {
   const [navigationMode, setNavigationMode] = useState<NavigationMode>('cursor')
   const [resetToCursorToken, setResetToCursorToken] = useState(0)
   const [selectionRect, setSelectionRect] = useState<SelectionRect | null>(null)
+  const [boardContextMenu, setBoardContextMenu] = useState<BoardContextMenu | null>(null)
   const [arrows, setArrows] = useState<Arrow[]>([])
+  const [layerOrder, setLayerOrder] = useState<string[]>([])
   const [selectedArrowId, setSelectedArrowId] = useState<string | null>(null)
   const [arrowDrag, setArrowDrag] = useState<ArrowDrag | null>(null)
   const [arrowPointer, setArrowPointer] = useState<Point | null>(null)
   const [snapAnchor, setSnapAnchor] = useState<Anchor | null>(null)
+
+  const allObjectIds = useMemo(() => [
+    ...drawings.map((item) => item.id),
+    ...stickers.map((item) => item.id),
+    ...texts.map((item) => item.id),
+    ...arrows.map((item) => item.id),
+  ], [drawings, stickers, texts, arrows])
+  const orderedObjectIds = useMemo(() => normalizeLayerOrder(layerOrder, allObjectIds), [layerOrder, allObjectIds])
+  const objectLayers = useMemo(() => new Map(orderedObjectIds.map((id, index) => [id, index + 1])), [orderedObjectIds])
+  const selectedLayerIds = useMemo(() => selectedArrowId ? [selectedArrowId]
+    : selectedDrawingId ? [selectedDrawingId]
+      : selectedStickerId ? [selectedStickerId]
+        : multiSelectedIds.length ? multiSelectedIds
+          : selectedId ? [selectedId] : [],
+  [selectedArrowId, selectedDrawingId, selectedStickerId, multiSelectedIds, selectedId])
+  const changeObjectLayer = (ids: string[], action: LayerAction) => {
+    setLayerOrder((current) => reorderLayers(normalizeLayerOrder(current, allObjectIds), ids, action))
+  }
+
+  useEffect(() => {
+    setLayerOrder((current) => {
+      const normalized = normalizeLayerOrder(current, allObjectIds)
+      return normalized.length === current.length && normalized.every((id, index) => id === current[index])
+        ? current : normalized
+    })
+  }, [allObjectIds])
 
   const addStickerAtClient = (sticker: StickerStyle, clientX: number, clientY: number) => {
     const board = boardRef.current
@@ -243,6 +340,8 @@ export default function BoardCanvas() {
 
   const connectableItems = [...texts, ...stickers]
   textsRef.current = texts
+  stickersRef.current = stickers
+  drawingsRef.current = drawings
   connectableItemsRef.current = connectableItems
   arrowsRef.current = arrows
   arrowDragRef.current = arrowDrag
@@ -274,6 +373,7 @@ export default function BoardCanvas() {
     arrowGeometryCacheRef.current = next
     return geometries
   }, [arrows, geometryTextKey, draggingArrowId])
+  arrowGeometriesRef.current = arrowGeometries
 
   useEffect(() => {
     const activeIds = new Set([...multiSelectedIds, selectedId, editingId])
@@ -453,22 +553,97 @@ export default function BoardCanvas() {
     setTexts((current) => current.map((item) => ids.has(item.id) ? applyTextChanges(item, changes, viewRef.current, viewportHeight()) : item))
   }
 
-  const scaleSelectedTexts = (startItems: TextItem[], anchorX: number, anchorY: number, factor: number) => {
-    startItems.forEach((item) => ensureTextVisibleIdsRef.current.add(item.id))
-    pendingTextChangeBaseRef.current = textsRef.current
-    const originals = new Map(startItems.map((item) => [item.id, item]))
+  const captureGroupTransform = () => {
+    const selected = new Set(multiSelectedIds)
+    groupTransformStartRef.current = {
+      texts: texts.filter((item) => selected.has(item.id)).map((item) => ({ ...item })),
+      stickers: stickers.filter((item) => selected.has(item.id)).map((item) => ({ ...item })),
+      drawings: drawings.filter((item) => selected.has(item.id)).map((item) => ({ ...item,
+        points: item.points.map((point) => ({ ...point })) })),
+      arrows: arrows.filter((item) => selected.has(item.id)).map((item) => ({ ...item,
+        tail: { ...item.tail }, head: { ...item.head }, bend: { ...item.bend },
+        curveBends: item.curveBends?.map((point) => ({ ...point })) as [Point, Point, Point] | undefined,
+        pendingStraightBend: item.pendingStraightBend ? { ...item.pendingStraightBend } : undefined })),
+    }
+  }
+
+  const moveSelectedObjects = (startItems: GroupSelectionItem[], requestedDx: number, requestedDy: number) => {
+    const snapshot = groupTransformStartRef.current
+    if (!snapshot?.texts.length && !snapshot?.stickers.length && !snapshot?.drawings.length && !snapshot?.arrows.length) return
+    const left = Math.min(...startItems.map((item) => item.x))
+    const top = Math.min(...startItems.map((item) => item.y))
+    const right = Math.max(...startItems.map((item) => item.x + item.width))
+    const bottom = Math.max(...startItems.map((item) => item.y + item.height))
+    const dx = Math.max(-left, Math.min(BOARD_WIDTH - right, requestedDx))
+    const dy = Math.max(-top, Math.min(BOARD_HEIGHT - bottom, requestedDy))
+    const textStarts = new Map(snapshot.texts.map((item) => [item.id, item]))
+    const stickerStarts = new Map(snapshot.stickers.map((item) => [item.id, item]))
+    const drawingStarts = new Map(snapshot.drawings.map((item) => [item.id, item]))
+    const arrowStarts = new Map(snapshot.arrows.map((item) => [item.id, item]))
     setTexts((current) => current.map((item) => {
-      const start = originals.get(item.id)
+      const start = textStarts.get(item.id)
+      return start ? { ...item, x: start.x + dx, y: start.y + dy } : item
+    }))
+    setStickers((current) => current.map((item) => {
+      const start = stickerStarts.get(item.id)
+      return start ? { ...item, x: start.x + dx, y: start.y + dy } : item
+    }))
+    setDrawings((current) => current.map((item) => {
+      const start = drawingStarts.get(item.id)
+      return start ? { ...item, x: start.x + dx, y: start.y + dy } : item
+    }))
+    const movePoint = (point: Point) => ({ x: point.x + dx, y: point.y + dy })
+    setArrows((current) => current.map((item) => {
+      const start = arrowStarts.get(item.id)
       if (!start) return item
-      return constrainText({
-        ...item,
-        x: anchorX + (start.x - anchorX) * factor,
-        y: anchorY + (start.y - anchorY) * factor,
-        width: start.width * factor,
-        height: start.height * factor,
+      return { ...start,
+        tail: start.tail.textId ? start.tail : { ...start.tail, ...movePoint(start.tail) },
+        head: start.head.textId ? start.head : { ...start.head, ...movePoint(start.head) },
+        bend: movePoint(start.bend), bendOffset: undefined, bendEdited: true,
+        curveBends: start.curveBends?.map(movePoint) as [Point, Point, Point] | undefined,
+        pendingStraightBend: start.pendingStraightBend ? movePoint(start.pendingStraightBend) : undefined }
+    }))
+  }
+
+  const scaleSelectedObjects = (_startItems: GroupSelectionItem[], anchorX: number, anchorY: number, factor: number) => {
+    const snapshot = groupTransformStartRef.current
+    if (!snapshot) return
+    const scalePoint = (point: Point) => ({ x: anchorX + (point.x - anchorX) * factor,
+      y: anchorY + (point.y - anchorY) * factor })
+    const textStarts = new Map(snapshot.texts.map((item) => [item.id, item]))
+    const stickerStarts = new Map(snapshot.stickers.map((item) => [item.id, item]))
+    const drawingStarts = new Map(snapshot.drawings.map((item) => [item.id, item]))
+    const arrowStarts = new Map(snapshot.arrows.map((item) => [item.id, item]))
+    const selectedConnectables = new Set([...snapshot.texts, ...snapshot.stickers].map((item) => item.id))
+    setTexts((current) => current.map((item) => {
+      const start = textStarts.get(item.id)
+      if (!start) return item
+      const position = scalePoint(start)
+      return { ...item, ...position, width: start.width * factor, height: start.height * factor,
         baseHeight: (start.baseHeight ?? start.height) * factor,
-        fontSize: Math.round(start.fontSize * factor * 10) / 10,
-      }, viewRef.current, viewportHeight())
+        fontSize: Math.round(start.fontSize * factor * 10) / 10 }
+    }))
+    setStickers((current) => current.map((item) => {
+      const start = stickerStarts.get(item.id)
+      if (!start) return item
+      return { ...item, ...scalePoint(start), width: start.width * factor, height: start.height * factor }
+    }))
+    setDrawings((current) => current.map((item) => {
+      const start = drawingStarts.get(item.id)
+      if (!start) return item
+      return { ...item, ...scalePoint(start), width: start.width * factor, height: start.height * factor,
+        strokeWidth: start.strokeWidth * factor,
+        points: start.points.map((point) => ({ x: point.x * factor, y: point.y * factor })) }
+    }))
+    setArrows((current) => current.map((item) => {
+      const start = arrowStarts.get(item.id)
+      if (!start) return item
+      const scaleAnchor = (anchor: Anchor) => anchor.textId && !selectedConnectables.has(anchor.textId)
+        ? anchor : { ...anchor, ...scalePoint(anchor) }
+      return { ...start, tail: scaleAnchor(start.tail), head: scaleAnchor(start.head),
+        bend: scalePoint(start.bend), bendOffset: undefined, bendEdited: true,
+        curveBends: start.curveBends?.map(scalePoint) as [Point, Point, Point] | undefined,
+        pendingStraightBend: start.pendingStraightBend ? scalePoint(start.pendingStraightBend) : undefined }
     }))
   }
 
@@ -498,7 +673,33 @@ export default function BoardCanvas() {
     window.getSelection()?.removeAllRanges()
   }
 
-  const selectText = (id: string) => {
+  const applyObjectSelection = (ids: string[]) => {
+    const existing = new Set(allObjectIds)
+    const unique = [...new Set(ids)].filter((id) => existing.has(id))
+    const single = unique.length === 1 ? unique[0] : null
+    setMultiSelectedIds(unique.length > 1 ? unique : [])
+    setSelectedId(single && texts.some((item) => item.id === single) ? single : null)
+    setSelectedStickerId(single && stickers.some((item) => item.id === single) ? single : null)
+    setSelectedDrawingId(single && drawings.some((item) => item.id === single) ? single : null)
+    setSelectedArrowId(single && arrows.some((item) => item.id === single) ? single : null)
+    setEditingId(null)
+    setFocusId(null)
+    setEditingStickerId(null)
+    setFocusStickerId(null)
+  }
+
+  const toggleObjectSelection = (id: string) => {
+    clearTextSelection()
+    const current = multiSelectedIds.length ? multiSelectedIds
+      : selectedId ? [selectedId]
+        : selectedStickerId ? [selectedStickerId]
+          : selectedDrawingId ? [selectedDrawingId]
+            : selectedArrowId ? [selectedArrowId] : []
+    applyObjectSelection(current.includes(id) ? current.filter((item) => item !== id) : [...current, id])
+  }
+
+  const selectText = (id: string, additive = false) => {
+    if (additive) { toggleObjectSelection(id); return }
     setSelectedArrowId(null)
     setSelectedStickerId(null)
     setSelectedDrawingId(null)
@@ -517,7 +718,8 @@ export default function BoardCanvas() {
     setMultiSelectedIds([])
   }
 
-  const selectSticker = (id: string) => {
+  const selectSticker = (id: string, additive = false) => {
+    if (additive) { toggleObjectSelection(id); return }
     const editor = editingId ? editorRefs.current.get(editingId) : null
     if (editor && document.activeElement === editor) editor.blur()
     clearTextSelection()
@@ -530,7 +732,8 @@ export default function BoardCanvas() {
     setSelectedStickerId(id)
   }
 
-  const selectDrawing = (id: string) => {
+  const selectDrawing = (id: string, additive = false) => {
+    if (additive) { toggleObjectSelection(id); return }
     clearTextSelection()
     setSelectedArrowId(null)
     setSelectedStickerId(null)
@@ -539,6 +742,18 @@ export default function BoardCanvas() {
     setEditingId(null)
     setFocusId(null)
     setSelectedDrawingId(id)
+  }
+
+  const selectArrow = (id: string, additive = false) => {
+    if (additive) { toggleObjectSelection(id); return }
+    clearTextSelection()
+    setSelectedArrowId(id)
+    setSelectedStickerId(null)
+    setSelectedDrawingId(null)
+    setSelectedId(null)
+    setMultiSelectedIds([])
+    setEditingId(null)
+    setFocusId(null)
   }
 
   const changeDrawing = (id: string, changes: Partial<DrawingItem>) => {
@@ -599,17 +814,6 @@ export default function BoardCanvas() {
     setSelectedStickerId((current) => current === id ? null : current)
     setEditingStickerId((current) => current === id ? null : current)
     setFocusStickerId((current) => current === id ? null : current)
-  }
-
-  const copySticker = (item: StickerItem) => {
-    const id = crypto.randomUUID()
-    setStickers((current) => [...current, { ...item, id,
-      x: Math.min(BOARD_WIDTH - item.width, item.x + 20),
-      y: Math.min(BOARD_HEIGHT - item.height, item.y + 20) }])
-    setSelectedStickerId(id)
-    setSelectedDrawingId(null)
-    setEditingStickerId(null)
-    setFocusStickerId(null)
   }
 
   const editText = (id: string) => {
@@ -740,52 +944,113 @@ export default function BoardCanvas() {
     window.getSelection()?.removeAllRanges()
   }
 
+  const deleteSelectedObjects = (ids: string[]) => {
+    const deleted = new Set(ids)
+    setTexts((current) => current.filter((item) => !deleted.has(item.id)))
+    setStickers((current) => current.filter((item) => !deleted.has(item.id)))
+    setDrawings((current) => current.filter((item) => !deleted.has(item.id)))
+    setArrows((current) => current.filter((arrow) => !deleted.has(arrow.id)
+      && !deleted.has(arrow.tail.textId ?? '') && !deleted.has(arrow.head.textId ?? '')))
+    setSelectedId(null)
+    setSelectedStickerId(null)
+    setSelectedDrawingId(null)
+    setSelectedArrowId(null)
+    setMultiSelectedIds([])
+    setEditingId(null)
+    setFocusId(null)
+    setEditingStickerId(null)
+    setFocusStickerId(null)
+    clearTextSelection()
+  }
+
   const selectedObjectClipboard = (): ObjectClipboard | null => {
     if (selectedArrowId) return null
+    if (selectedStickerId) {
+      const sticker = stickers.find((item) => item.id === selectedStickerId)
+      return sticker ? {
+        version: 1,
+        texts: [],
+        stickers: [{ ...sticker, html: stickerEditorRefs.current.get(sticker.id)?.innerHTML ?? sticker.html }],
+        arrows: [],
+        drawings: [],
+      } : null
+    }
+    if (selectedDrawingId) {
+      const drawing = drawings.find((item) => item.id === selectedDrawingId)
+      return drawing ? {
+        version: 1,
+        texts: [],
+        stickers: [],
+        arrows: [],
+        drawings: [{ ...drawing, points: drawing.points.map((point) => ({ ...point })) }],
+      } : null
+    }
     const ids = new Set(multiSelectedIds.length ? multiSelectedIds : selectedId ? [selectedId] : [])
     if (!ids.size) return null
     return {
       version: 1,
       texts: texts.filter((item) => ids.has(item.id)).map((item) => ({ ...item, html: editorRefs.current.get(item.id)?.innerHTML ?? item.html })),
+      stickers: stickers.filter((item) => ids.has(item.id)).map((item) => ({ ...item,
+        html: stickerEditorRefs.current.get(item.id)?.innerHTML ?? item.html })),
       arrows: [],
+      drawings: drawings.filter((item) => ids.has(item.id)).map((item) => ({ ...item,
+        points: item.points.map((point) => ({ ...point })) })),
     }
   }
 
   const writeObjectClipboard = (payload: ObjectClipboard) => {
+    objectClipboardRef.current = payload
     pasteCountRef.current = 0
     const json = JSON.stringify(payload)
+    const plainText = objectClipboardPlainText(payload)
     const copy = (event: ClipboardEvent) => {
       event.preventDefault()
       event.clipboardData?.setData(OBJECT_CLIPBOARD_TYPE, json)
-      event.clipboardData?.setData('text/plain', OBJECT_CLIPBOARD_PREFIX + json)
+      event.clipboardData?.setData('text/plain', plainText)
     }
     document.addEventListener('copy', copy, { capture: true, once: true })
     const copied = document.execCommand('copy')
     document.removeEventListener('copy', copy, true)
-    if (!copied) void navigator.clipboard?.writeText(OBJECT_CLIPBOARD_PREFIX + json)
+    if (!copied) void navigator.clipboard?.writeText(plainText)
   }
 
   const pasteObjects = (payload: ObjectClipboard) => {
-    if (!payload.texts.length) return
+    if (!payload.texts.length && !payload.stickers.length && !payload.drawings.length) return
     const view = viewRef.current
     const offset = 24 * ++pasteCountRef.current / (view?.scale ?? 1)
     const sourceTexts = payload.texts
-    const points: Point[] = sourceTexts.flatMap((item) => [
+    const sourceStickers = payload.stickers
+    const sourceDrawings = payload.drawings
+    const bounds: Point[] = sourceTexts.flatMap((item) => [
       { x: item.x, y: item.y }, { x: item.x + item.width, y: item.y + item.height },
-    ])
-    const minX = Math.min(...points.map((point) => point.x))
-    const maxX = Math.max(...points.map((point) => point.x))
-    const minY = Math.min(...points.map((point) => point.y))
-    const maxY = Math.max(...points.map((point) => point.y))
+    ]).concat(sourceDrawings.flatMap((item) => [
+      { x: item.x, y: item.y }, { x: item.x + item.width, y: item.y + item.height },
+    ])).concat(sourceStickers.flatMap((item) => [
+      { x: item.x, y: item.y }, { x: item.x + item.width, y: item.y + item.height },
+    ]))
+    const minX = Math.min(...bounds.map((point) => point.x))
+    const maxX = Math.max(...bounds.map((point) => point.x))
+    const minY = Math.min(...bounds.map((point) => point.y))
+    const maxY = Math.max(...bounds.map((point) => point.y))
     const dx = Math.max(-minX, Math.min(BOARD_WIDTH - maxX, offset))
     const dy = Math.max(-minY, Math.min(BOARD_HEIGHT - maxY, offset))
     const idMap = new Map(sourceTexts.map((item) => [item.id, crypto.randomUUID()]))
     const newTexts = sourceTexts.map((item) => constrainText({ ...item, id: idMap.get(item.id)!, x: item.x + dx, y: item.y + dy }, view, viewportHeight()))
+    const newStickers = sourceStickers.map((item) => ({ ...item, id: crypto.randomUUID(), x: item.x + dx, y: item.y + dy }))
+    const newDrawings = sourceDrawings.map((item) => ({ ...item, id: crypto.randomUUID(),
+      x: item.x + dx, y: item.y + dy, points: item.points.map((point) => ({ ...point })) }))
     setTexts((current) => [...current, ...newTexts])
+    setStickers((current) => [...current, ...newStickers])
+    setDrawings((current) => [...current, ...newDrawings])
     setEditingId(null)
     setFocusId(null)
-    setSelectedId(newTexts.length === 1 ? newTexts[0].id : null)
-    setMultiSelectedIds(newTexts.length > 1 ? newTexts.map((item) => item.id) : [])
+    const newIds = [...newDrawings.map((item) => item.id), ...newStickers.map((item) => item.id), ...newTexts.map((item) => item.id)]
+    setMultiSelectedIds(newIds.length > 1 ? newIds : [])
+    setSelectedId(newIds.length === 1 && newTexts.length === 1 ? newTexts[0].id : null)
+    setSelectedDrawingId(newIds.length === 1 && newDrawings.length === 1 ? newDrawings[0].id : null)
+    setSelectedStickerId(newIds.length === 1 && newStickers.length === 1 ? newStickers[0].id : null)
+    setEditingStickerId(null)
+    setFocusStickerId(null)
     setSelectedArrowId(null)
   }
 
@@ -797,10 +1062,11 @@ export default function BoardCanvas() {
       if (selectedArrowId) { event.preventDefault(); return }
       const payload = selectedObjectClipboard()
       if (!payload) return
+      objectClipboardRef.current = payload
       const json = JSON.stringify(payload)
       event.preventDefault()
       event.clipboardData?.setData(OBJECT_CLIPBOARD_TYPE, json)
-      event.clipboardData?.setData('text/plain', OBJECT_CLIPBOARD_PREFIX + json)
+      event.clipboardData?.setData('text/plain', objectClipboardPlainText(payload))
       pasteCountRef.current = 0
     }
     const onPaste = (event: ClipboardEvent) => {
@@ -811,24 +1077,48 @@ export default function BoardCanvas() {
         : plain?.startsWith(OBJECT_CLIPBOARD_PREFIX) ? parseObjectClipboard(plain) : null
       if (!payload) return
       event.preventDefault()
+      objectClipboardRef.current = payload
       pasteObjects(payload)
     }
     window.addEventListener('copy', onCopy)
     window.addEventListener('paste', onPaste)
     return () => { window.removeEventListener('copy', onCopy); window.removeEventListener('paste', onPaste) }
-  }, [texts, arrows, selectedId, multiSelectedIds, selectedArrowId, navigationMode])
+  }, [texts, stickers, arrows, drawings, selectedId, multiSelectedIds, selectedStickerId, selectedArrowId, selectedDrawingId, navigationMode])
+
+  useEffect(() => {
+    if (!boardContextMenu) return
+    const close = (event: PointerEvent) => {
+      if (!(event.target instanceof Element) || !event.target.closest('.board-context-menu')) setBoardContextMenu(null)
+    }
+    const closeOnKey = (event: KeyboardEvent) => { if (event.key === 'Escape') setBoardContextMenu(null) }
+    const closeOnResize = () => setBoardContextMenu(null)
+    window.addEventListener('pointerdown', close)
+    window.addEventListener('keydown', closeOnKey)
+    window.addEventListener('resize', closeOnResize)
+    return () => {
+      window.removeEventListener('pointerdown', close)
+      window.removeEventListener('keydown', closeOnKey)
+      window.removeEventListener('resize', closeOnResize)
+    }
+  }, [boardContextMenu])
 
   useEffect(() => {
     const ids = multiSelectedIds.length ? multiSelectedIds : selectedId ? [selectedId] : []
     if (!ids.length || navigationMode !== 'cursor') return
 
     const onDelete = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && multiSelectedIds.length) {
+        event.preventDefault()
+        applyObjectSelection([])
+        return
+      }
       if (event.key !== 'Delete' || event.defaultPrevented) return
       const target = event.target
       if (target instanceof HTMLElement && (target.isContentEditable || target.closest('input, textarea, select'))) return
 
       event.preventDefault()
-      deleteSelectedTexts()
+      if (multiSelectedIds.length) deleteSelectedObjects(multiSelectedIds)
+      else deleteSelectedTexts()
     }
 
     window.addEventListener('keydown', onDelete)
@@ -876,6 +1166,23 @@ export default function BoardCanvas() {
     window.addEventListener('keydown', onDrawingKey)
     return () => window.removeEventListener('keydown', onDrawingKey)
   }, [selectedDrawingId, navigationMode])
+
+  useEffect(() => {
+    if (!selectedLayerIds.length || navigationMode !== 'cursor') return
+    const onLayerKey = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.shiftKey) return
+      const target = event.target
+      if (target instanceof HTMLElement && (target.isContentEditable || target.closest('input, textarea, select'))) return
+      const right = event.code === 'BracketRight'
+      const left = event.code === 'BracketLeft'
+      if (!right && !left) return
+      event.preventDefault()
+      const oneStep = event.ctrlKey || event.metaKey
+      changeObjectLayer(selectedLayerIds, right ? oneStep ? 'forward' : 'front' : oneStep ? 'backward' : 'back')
+    }
+    window.addEventListener('keydown', onLayerKey)
+    return () => window.removeEventListener('keydown', onLayerKey)
+  }, [selectedLayerIds, navigationMode, allObjectIds])
 
   useEffect(() => {
     if (editingStickerId && editingStickerId !== selectedStickerId) {
@@ -1271,8 +1578,22 @@ export default function BoardCanvas() {
           const top = (Math.min(drag.startY, y) - view.y) / view.scale
           const right = (Math.max(drag.startX, x) - view.x) / view.scale
           const bottom = (Math.max(drag.startY, y) - view.y) / view.scale
-          const ids = textsRef.current.filter((item) => item.x < right && item.x + item.width > left && item.y < bottom && item.y + item.height > top).map((item) => item.id)
-          setSelectedId(ids.length === 1 ? ids[0] : null)
+          const overlaps = (item: { x: number; y: number; width: number; height: number }) =>
+            item.x < right && item.x + item.width > left && item.y < bottom && item.y + item.height > top
+          const textIds = textsRef.current.filter(overlaps).map((item) => item.id)
+          const stickerIds = stickersRef.current.filter(overlaps).map((item) => item.id)
+          const drawingIds = drawingsRef.current.filter(overlaps).map((item) => item.id)
+          const arrowIds = arrowsRef.current.filter((arrow) => {
+            const geometry = arrowGeometriesRef.current.get(arrow.id)
+            if (!geometry) return false
+            return overlaps(arrowSelectionBounds(geometry, 8 / view.scale))
+          }).map((arrow) => arrow.id)
+          const ids = [...drawingIds, ...stickerIds, ...textIds, ...arrowIds]
+          const single = ids.length === 1 ? ids[0] : null
+          setSelectedId(single && textIds.includes(single) ? single : null)
+          setSelectedStickerId(single && stickerIds.includes(single) ? single : null)
+          setSelectedDrawingId(single && drawingIds.includes(single) ? single : null)
+          setSelectedArrowId(single && arrowIds.includes(single) ? single : null)
           setMultiSelectedIds(ids.length > 1 ? ids : [])
         }
       }
@@ -1314,13 +1635,36 @@ export default function BoardCanvas() {
     }
   }, [])
 
-  const selectedTexts = multiSelectedIds.length
-    ? texts.filter((item) => multiSelectedIds.includes(item.id))
-    : texts.filter((item) => item.id === selectedId)
+  const multiSelectedTexts = texts.filter((item) => multiSelectedIds.includes(item.id))
+  const textOnlyMultiSelection = multiSelectedIds.length > 1 && multiSelectedTexts.length === multiSelectedIds.length
+  const selectedTexts = textOnlyMultiSelection ? multiSelectedTexts : texts.filter((item) => item.id === selectedId)
   const selectedText = selectedTexts[0]
   const selectedSticker = stickers.find((sticker) => sticker.id === selectedStickerId)
   const selectedDrawing = drawings.find((drawing) => drawing.id === selectedDrawingId)
   const selectedArrow = arrows.find((arrow) => arrow.id === selectedArrowId)
+  const selectedGroupItems: GroupSelectionItem[] = []
+  multiSelectedIds.forEach((id) => {
+    const text = texts.find((item) => item.id === id)
+    if (text) {
+      selectedGroupItems.push({ id, kind: 'text', x: text.x, y: text.y, width: text.width, height: text.height,
+        fontSize: text.fontSize })
+      return
+    }
+    const sticker = stickers.find((item) => item.id === id)
+    if (sticker) {
+      selectedGroupItems.push({ id, kind: 'sticker', x: sticker.x, y: sticker.y,
+        width: sticker.width, height: sticker.height })
+      return
+    }
+    const drawing = drawings.find((item) => item.id === id)
+    if (drawing) {
+      selectedGroupItems.push({ id, kind: 'drawing', x: drawing.x, y: drawing.y,
+        width: drawing.width, height: drawing.height })
+      return
+    }
+    const geometry = arrowGeometries.get(id)
+    if (geometry) selectedGroupItems.push({ id, kind: 'arrow', ...arrowSelectionBounds(geometry, 8 / (viewState?.scale ?? 1)) })
+  })
   const occupiedConnectors = occupiedConnectorKeys(arrows)
   const selectedArrowHandle = selectedArrow ? arrowGeometries.get(selectedArrow.id)?.handle : null
   const selectedBounds = selectedTexts.length ? {
@@ -1365,6 +1709,31 @@ export default function BoardCanvas() {
 
   return (
     <main ref={boardRef} className={`board${navigationMode === 'hand' ? ' board--hand' : ' board--cursor'}${drawingStyle ? ' board--drawing' : ''}`} aria-label="Поле доски 3840 на 2160 пикселей"
+      onContextMenu={(event) => {
+        const target = event.target
+        if (!(target instanceof Element)) return
+        let object = target.closest<HTMLElement>('[data-board-object-kind][data-board-object-id]')
+        if (!object && target.closest('.group-selection__move-area')) {
+          object = document.elementsFromPoint(event.clientX, event.clientY)
+            .map((element) => element.closest<HTMLElement>('[data-board-object-kind][data-board-object-id]'))
+            .find((element): element is HTMLElement => Boolean(element?.dataset.boardObjectId)) ?? null
+        }
+        if (object) {
+          const objectKind = object.dataset.boardObjectKind as BoardObjectKind
+          const objectId = object.dataset.boardObjectId
+          if (!objectId) return
+          event.preventDefault()
+          if (objectKind === 'text') selectText(objectId)
+          else if (objectKind === 'sticker') selectSticker(objectId)
+          else if (objectKind === 'drawing') selectDrawing(objectId)
+          else selectArrow(objectId)
+          setBoardContextMenu({ x: event.clientX, y: event.clientY, objectKind, objectId })
+          return
+        }
+        if (target.closest('button, input, textarea, select, [contenteditable="true"], .board-arrow-handles')) return
+        event.preventDefault()
+        setBoardContextMenu({ x: event.clientX, y: event.clientY })
+      }}
       onDragOver={(event) => {
         if (!Array.from(event.dataTransfer.types).includes(STICKER_DRAG_TYPE)) return
         event.preventDefault()
@@ -1388,18 +1757,21 @@ export default function BoardCanvas() {
         aria-hidden="true" />
       {viewState && <div className="board-objects" style={{ width: BOARD_WIDTH, height: BOARD_HEIGHT, transform: `translate(${viewState.x}px, ${viewState.y}px) scale(${viewState.scale})` }}>
         {drawings.map((drawing) => <Drawing key={drawing.id} item={drawing}
-          selected={!drawingStyle && selectedDrawingId === drawing.id}
-          interactive={navigationMode === 'cursor' && !drawingStyle} scale={viewState.scale}
+          selected={!drawingStyle && (selectedDrawingId === drawing.id || multiSelectedIds.includes(drawing.id))}
+          groupSelected={multiSelectedIds.includes(drawing.id)}
+          interactive={navigationMode === 'cursor' && !drawingStyle} scale={viewState.scale} layer={objectLayers.get(drawing.id) ?? 1}
           onSelect={selectDrawing} onChange={changeDrawing} />)}
-        {drawingDraft && <svg className="board-drawing-preview" width={BOARD_WIDTH} height={BOARD_HEIGHT}
+        {drawingDraft && <svg className="board-drawing-preview" style={{ zIndex: orderedObjectIds.length + 2 }} width={BOARD_WIDTH} height={BOARD_HEIGHT}
           viewBox={`0 0 ${BOARD_WIDTH} ${BOARD_HEIGHT}`} aria-hidden="true">
           <path d={drawingPath(drawingDraft.points)} fill="none" stroke={drawingDraft.color}
             strokeWidth={drawingDraft.width} strokeLinecap="round" strokeLinejoin="round" />
         </svg>}
-        {stickers.map((sticker) => <Sticker key={sticker.id} item={sticker} selected={selectedStickerId === sticker.id}
+        {stickers.map((sticker) => <Sticker key={sticker.id} item={sticker}
+          selected={selectedStickerId === sticker.id || multiSelectedIds.includes(sticker.id)}
+          groupSelected={multiSelectedIds.includes(sticker.id)}
           interactive={navigationMode === 'cursor'} editing={editingStickerId === sticker.id}
           focusOnMount={focusStickerId === sticker.id && editingStickerId === sticker.id}
-          scale={viewState.scale} onSelect={selectSticker} onEdit={editSticker} onChange={changeSticker}
+          scale={viewState.scale} layer={objectLayers.get(sticker.id) ?? 1} onSelect={selectSticker} onEdit={editSticker} onChange={changeSticker}
           onEditorRef={(id, node) => { if (node) stickerEditorRefs.current.set(id, node); else stickerEditorRefs.current.delete(id) }}
           onSaveSelection={saveStickerSelection}
           showConnectors={arrowDrag !== null && (arrowDrag.kind !== 'bend' && arrowDrag.kind !== 'new' || Boolean(arrowDrag.active))}
@@ -1408,9 +1780,9 @@ export default function BoardCanvas() {
           snapSide={snapAnchor?.textId === sticker.id ? snapAnchor.side ?? null : null}
           onConnectorStart={startArrow} />)}
         {texts.map((item) => <TextBox key={item.id} item={item} selected={selectedId === item.id || multiSelectedIds.includes(item.id)}
-          groupSelected={multiSelectedIds.length > 1 && multiSelectedIds.includes(item.id)} interactive={navigationMode === 'cursor'}
+          groupSelected={multiSelectedIds.includes(item.id)} interactive={navigationMode === 'cursor'}
           editing={editingId === item.id} focusOnMount={focusId === item.id && editingId === item.id}
-          scale={viewState.scale} minY={visible.top} maxY={visible.bottom}
+          scale={viewState.scale} layer={objectLayers.get(item.id) ?? 1} minY={visible.top} maxY={visible.bottom}
           onSelect={selectText} onEdit={editText} onChange={changeTextFromBox} onCommit={commitText}
           onDismiss={() => { clearTextSelection(); setSelectedId(null); setMultiSelectedIds([]); setEditingId(null); setFocusId(null) }} onSaveSelection={saveSelection}
           showConnectors={arrowDrag !== null && (arrowDrag.kind !== 'bend' && arrowDrag.kind !== 'new' || Boolean(arrowDrag.active))}
@@ -1419,12 +1791,13 @@ export default function BoardCanvas() {
           snapSide={snapAnchor?.textId === item.id ? snapAnchor.side ?? null : null}
           onConnectorStart={startArrow}
           onEditorRef={(id, node) => { if (node) editorRefs.current.set(id, node); else editorRefs.current.delete(id) }} />)}
+        <ArrowLayer arrows={arrows} texts={connectableItems} geometries={arrowGeometries} view={viewState} selectedId={selectedArrowId}
+          multiSelectedIds={multiSelectedIds} layers={objectLayers}
+          preview={arrowDrag?.kind === 'new' && arrowDrag.active && arrowDrag.tail && arrowPointer
+            ? { tail: arrowDrag.tail, head: snapAnchor ?? arrowPointer } : null}
+          onSelect={selectArrow}
+          onDrag={setArrowDrag} />
       </div>}
-      {viewState && <ArrowLayer arrows={arrows} texts={connectableItems} geometries={arrowGeometries} view={viewState} selectedId={selectedArrowId}
-        preview={arrowDrag?.kind === 'new' && arrowDrag.active && arrowDrag.tail && arrowPointer
-          ? { tail: arrowDrag.tail, head: snapAnchor ?? arrowPointer } : null}
-        onSelect={(id) => { setSelectedArrowId(id); setSelectedStickerId(null); setSelectedDrawingId(null); setSelectedId(null); setMultiSelectedIds([]); setEditingId(null) }}
-        onDrag={setArrowDrag} />}
       {viewState && selectedArrow && navigationMode === 'cursor' && <ArrowToolbar color={selectedArrow.color}
         shape={selectedArrow.shape ?? 'curved'} dash={selectedArrow.dash ?? 'solid'}
         tailEnd={selectedArrow.tailEnd ?? 'none'} headEnd={selectedArrow.headEnd ?? 'arrow'}
@@ -1446,34 +1819,78 @@ export default function BoardCanvas() {
             bendEdited: false, bendOffset: undefined, curveBends: undefined, pendingStraightBend: undefined }
         }))}
         onDash={(dash) => setArrows((current) => current.map((arrow) => arrow.id === selectedArrow.id ? { ...arrow, dash } : arrow))}
+        onLayer={(action) => changeObjectLayer([selectedArrow.id], action)}
         onDelete={() => { setArrows((current) => current.filter((arrow) => arrow.id !== selectedArrow.id)); setSelectedArrowId(null) }} />}
-      {viewState && navigationMode === 'cursor' && selectedTexts.length > 1 && <GroupSelection items={selectedTexts} view={viewState}
-        minY={visible.top} maxY={visible.bottom}
-        onMove={(items, dx, dy) => {
-          const source = items[0]
-          if (source) changeTextFromBox(source.id, { x: source.x + dx, y: source.y + dy })
-        }}
-        onScale={scaleSelectedTexts} />}
+      {viewState && navigationMode === 'cursor' && selectedGroupItems.length > 1 && <GroupSelection items={selectedGroupItems} view={viewState}
+        minY={textOnlyMultiSelection ? visible.top : 0} maxY={textOnlyMultiSelection ? visible.bottom : BOARD_HEIGHT}
+        onToggle={toggleObjectSelection} onTransformStart={captureGroupTransform}
+        onMove={moveSelectedObjects} onScale={scaleSelectedObjects} />}
       {selectionRect && <div className="board-selection" style={selectionRect} aria-hidden="true" />}
       {selectedText && viewState && navigationMode === 'cursor' && <TextToolbar key={multiSelectedIds.length ? multiSelectedIds.join(':') : selectedText.id}
         item={selectedText} items={selectedTexts} centerX={toolbarCenterX} top={toolbarTop} activeFormatsOverride={groupFormats}
         onChange={(changes) => multiSelectedIds.length ? changeSelectedTexts(changes) : changeText(selectedText.id, changes)}
         onFormat={formatText} onColor={setTextColor}
         onCopy={() => { const payload = selectedObjectClipboard(); if (payload) writeObjectClipboard(payload) }}
+        onLayer={(action) => changeObjectLayer(selectedTexts.map((item) => item.id), action)}
         onDelete={deleteSelectedTexts} />}
       {selectedSticker && viewState && navigationMode === 'cursor' && <StickerToolbar item={selectedSticker}
         centerX={stickerToolbarCenterX} top={stickerToolbarTop}
         onChange={(changes) => changeSticker(selectedSticker.id, changes)}
-        onFormat={formatSticker} onCopy={() => copySticker(selectedSticker)} onDelete={() => deleteSticker(selectedSticker.id)} />}
+        onFormat={formatSticker} onCopy={() => { const payload = selectedObjectClipboard(); if (payload) writeObjectClipboard(payload) }}
+        onLayer={(action) => changeObjectLayer([selectedSticker.id], action)} onDelete={() => deleteSticker(selectedSticker.id)} />}
       {selectedDrawing && viewState && navigationMode === 'cursor' && !drawingStyle && <DrawingToolbar
         color={selectedDrawing.color} width={selectedDrawing.strokeWidth}
         centerX={drawingToolbarCenterX} top={drawingToolbarTop}
         onColor={(color) => changeDrawing(selectedDrawing.id, { color })}
         onWidth={(strokeWidth) => changeDrawingStrokeWidth(selectedDrawing.id, strokeWidth)}
+        onCopy={() => { const payload = selectedObjectClipboard(); if (payload) writeObjectClipboard(payload) }}
+        onLayer={(action) => changeObjectLayer([selectedDrawing.id], action)}
         onDelete={() => {
           setDrawings((current) => current.filter((drawing) => drawing.id !== selectedDrawing.id))
           setSelectedDrawingId(null)
         }} />}
+      {boardContextMenu && <div className="board-context-menu" role="menu" aria-label="Меню холста"
+        style={{ left: Math.max(8, Math.min(window.innerWidth - 226, boardContextMenu.x)),
+          top: Math.max(8, Math.min(window.innerHeight
+            - (boardContextMenu.objectKind === 'arrow' ? 138 : boardContextMenu.objectKind ? 174 : 102), boardContextMenu.y)) }}
+        onPointerDown={(event) => event.stopPropagation()} onContextMenu={(event) => event.preventDefault()}>
+        {boardContextMenu.objectKind && boardContextMenu.objectId ? <>
+          {boardContextMenu.objectKind !== 'arrow' && <button type="button" role="menuitem" onClick={() => {
+            const payload = selectedObjectClipboard()
+            setBoardContextMenu(null)
+            if (payload) writeObjectClipboard(payload)
+          }}><span>Копировать</span><span className="board-context-menu__shortcut">Ctrl+C</span></button>}
+          <button type="button" role="menuitem" onClick={() => {
+            changeObjectLayer([boardContextMenu.objectId!], 'front')
+            setBoardContextMenu(null)
+          }}><span>На передний план</span><span className="board-context-menu__shortcut">]</span></button>
+          <button type="button" role="menuitem" onClick={() => {
+            changeObjectLayer([boardContextMenu.objectId!], 'back')
+            setBoardContextMenu(null)
+          }}><span>На задний план</span><span className="board-context-menu__shortcut">[</span></button>
+          <button type="button" role="menuitem" onClick={() => {
+            const { objectKind, objectId } = boardContextMenu
+            setBoardContextMenu(null)
+            if (objectKind === 'text') deleteSelectedTexts()
+            else if (objectKind === 'sticker') deleteSticker(objectId!)
+            else if (objectKind === 'drawing') {
+              setDrawings((current) => current.filter((drawing) => drawing.id !== objectId))
+              setSelectedDrawingId(null)
+            } else {
+              setArrows((current) => current.filter((arrow) => arrow.id !== objectId))
+              setSelectedArrowId(null)
+            }
+          }}><span>Удалить</span><span className="board-context-menu__shortcut">Delete</span></button>
+        </> : <>
+          <button type="button" role="menuitem" onClick={() => {
+            const payload = objectClipboardRef.current
+            setBoardContextMenu(null)
+            if (payload) pasteObjects(payload)
+          }}><span>Вставить</span><span className="board-context-menu__shortcut">Ctrl+V</span></button>
+          <span className="board-context-menu__divider" aria-hidden="true" />
+          <button type="button" role="menuitem" disabled><span>Комментарий</span></button>
+        </>}
+      </div>}
       <ToolPanel resetToCursorToken={resetToCursorToken} boardScale={viewState?.scale ?? 1} onNavigationModeChange={(mode) => {
         navigationModeRef.current = mode
         setNavigationMode(mode)
