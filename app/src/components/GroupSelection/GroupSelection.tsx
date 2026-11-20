@@ -8,12 +8,13 @@ type Edge = 'top' | 'right' | 'bottom' | 'left'
 type Bounds = { left: number; top: number; right: number; bottom: number }
 export type GroupSelectionItem = {
   id: string
-  kind: 'text' | 'sticker' | 'drawing' | 'arrow'
+  kind: 'text' | 'sticker' | 'drawing' | 'arrow' | 'table'
   x: number
   y: number
   width: number
   height: number
   fontSize?: number
+  minScale?: number
 }
 type Gesture = {
   pointerId: number
@@ -143,6 +144,7 @@ export default function GroupSelection({ items, view, minY, maxY, onToggle, onTr
     const minFactor = Math.max(...start.items.map((item) => item.kind === 'text' && item.fontSize
       ? Math.max(MIN_FONT_SIZE / item.fontSize, MIN_TEXT_WIDTH / item.width, MIN_TEXT_HEIGHT / item.height)
       : item.kind === 'sticker' ? Math.max(56 / item.width, 56 / item.height)
+        : item.kind === 'table' ? item.minScale ?? .05
         : item.kind === 'drawing' ? Math.max(2 / item.width, 2 / item.height)
           : .05))
     const maxFactor = Math.min(

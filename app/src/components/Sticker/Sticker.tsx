@@ -6,6 +6,10 @@ import HandleDot from '../HandleDot'
 import './Sticker.css'
 
 const MIN_STICKER_SIZE = 56
+const INITIAL_STICKER_SIZE = 160
+const INITIAL_FONT_SIZE = 16
+const MIN_FONT_SIZE = 8
+const MAX_FONT_SIZE = 96
 type Corner = 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right'
 type Gesture = { mode: 'move' | 'corner' | 'edge'; pointerId: number; clientX: number; clientY: number;
   start: StickerItem; corner?: Corner; edge?: ConnectorSide }
@@ -66,8 +70,10 @@ export default function Sticker({ item, selected, groupSelected, interactive, ed
   const fitText = () => {
     const editor = editorRef.current
     if (!editor) return
-    let low = 8
-    let high = 16
+    // Scale the target font with the sticker's area, including one-sided resizes.
+    const areaScale = Math.sqrt((item.width * item.height) / (INITIAL_STICKER_SIZE ** 2))
+    let low = MIN_FONT_SIZE
+    let high = Math.max(MIN_FONT_SIZE, Math.min(MAX_FONT_SIZE, Math.round(INITIAL_FONT_SIZE * areaScale)))
     let best = low
     while (low <= high) {
       const size = Math.floor((low + high) / 2)

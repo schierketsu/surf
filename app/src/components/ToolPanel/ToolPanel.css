@@ -113,7 +113,8 @@
 
 .tool-panel__icon,
 .tool-panel__sticker-icon,
-.tool-panel__pen-icon {
+.tool-panel__pen-icon,
+.tool-panel__table-icon {
   display: block;
 }
 
@@ -127,6 +128,13 @@
 .tool-panel__pen-icon {
   width: 21px;
   height: 21px;
+  object-fit: contain;
+  pointer-events: none;
+}
+
+.tool-panel__table-icon {
+  width: 22px;
+  height: 22px;
   object-fit: contain;
   pointer-events: none;
 }
@@ -313,6 +321,36 @@
   overflow-y: auto;
   transform: translateY(-50%);
 }
+
+.tool-panel__popover--table {
+  top: 50%;
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  width: max-content;
+  padding: 12px;
+  transform: translateY(-50%);
+}
+
+.tool-panel__table-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 24px);
+  gap: 3px;
+}
+
+.tool-panel__table-cell {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid #a9b3bf;
+  border-radius: 3px;
+  background: #fff;
+  cursor: pointer;
+}
+
+.tool-panel__table-cell[data-highlighted='true'] { background: #f4f4f4; border-color: #a7b1be; outline: 1px solid #a7b1be; }
+.tool-panel__table-cell:focus-visible { outline: 2px solid #a7b1be; outline-offset: 1px; }
+.tool-panel__table-size { color: var(--control-text); font-size: 13px; }
 
 .tool-panel__swatch {
   width: 44px;

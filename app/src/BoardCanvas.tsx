@@ -1,5 +1,8 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import ToolPanel, { STICKER_DRAG_TYPE, type DrawingStyle, type NavigationMode, type StickerStyle } from './components/ToolPanel/ToolPanel'
+import ToolPanel, { STICKER_DRAG_TYPE, type DrawingStyle, type NavigationMode, type StickerStyle, type TableSize } from './components/ToolPanel/ToolPanel'
+import BoardTable, { MIN_TABLE_CELL_HEIGHT, MIN_TABLE_CELL_WIDTH, TABLE_CELL_HEIGHT, TABLE_CELL_WIDTH,
+  createTableCell, tableColumnWidths, tableHeight, tableWidth, type TableCellData, type TableItem } from './components/BoardTable/BoardTable'
+import TableToolbar from './components/TableToolbar/TableToolbar'
 import ZoomControls from './components/ZoomControls/ZoomControls'
 import TextBox, { MAX_FONT_SIZE, MIN_FONT_SIZE, MIN_TEXT_HEIGHT, MIN_TEXT_WIDTH, type TextItem } from './components/TextBox/TextBox'
 import GroupSelection, { type GroupSelectionItem } from './components/GroupSelection/GroupSelection'
@@ -16,11 +19,11 @@ import type { LayerAction } from './components/LayerMenuItems'
 
 type View = { scale: number; x: number; y: number }
 type SelectionRect = { left: number; top: number; width: number; height: number }
-type BoardObjectKind = 'text' | 'sticker' | 'drawing' | 'arrow'
+type BoardObjectKind = 'text' | 'sticker' | 'drawing' | 'arrow' | 'table'
 type BoardContextMenu = { x: number; y: number; objectKind?: BoardObjectKind; objectId?: string }
 type FormatCommand = 'bold' | 'italic' | 'underline' | 'strikeThrough'
 type DrawingDraft = DrawingStyle & { points: Point[] }
-type GroupTransformSnapshot = { texts: TextItem[]; stickers: StickerItem[]; drawings: DrawingItem[]; arrows: Arrow[] }
+type GroupTransformSnapshot = { texts: TextItem[]; stickers: StickerItem[]; tables: TableItem[]; drawings: DrawingItem[]; arrows: Arrow[] }
 
 const MAX_SCALE = 4
 const WHEEL_ZOOM_SENSITIVITY = 0.002
@@ -33,7 +36,7 @@ const ARROW_DRAG_THRESHOLD = 6
 const OBJECT_CLIPBOARD_TYPE = 'application/x-doska-objects+json'
 const OBJECT_CLIPBOARD_PREFIX = 'DOSKA_OBJECTS_V1:'
 
-type ObjectClipboard = { version: 1; texts: TextItem[]; stickers: StickerItem[]; arrows: Arrow[]; drawings: DrawingItem[] }
+type ObjectClipboard = { version: 1; texts: TextItem[]; stickers: StickerItem[]; tables: TableItem[]; arrows: Arrow[]; drawings: DrawingItem[] }
 function occupiedConnectorKeys(items: Arrow[], exceptArrowId?: string) {
   const occupied = new Set<string>()
   for (const arrow of items) {
@@ -49,6 +52,7 @@ function parseObjectClipboard(value: string): ObjectClipboard | null {
     const data = JSON.parse(value.startsWith(OBJECT_CLIPBOARD_PREFIX) ? value.slice(OBJECT_CLIPBOARD_PREFIX.length) : value)
     return data?.version === 1 && Array.isArray(data.texts) && Array.isArray(data.arrows)
       ? { ...data, stickers: Array.isArray(data.stickers) ? data.stickers : [],
+        tables: Array.isArray(data.tables) ? data.tables : [],
         drawings: Array.isArray(data.drawings) ? data.drawings : [] } as ObjectClipboard
       : null
   } catch { return null }
@@ -61,7 +65,128 @@ function htmlToPlainText(html: string) {
 }
 
 function objectClipboardPlainText(payload: ObjectClipboard) {
-  return [...payload.texts, ...payload.stickers].map((item) => htmlToPlainText(item.html)).join('\n')
+  return [...[...payload.texts, ...payload.stickers].map((item) => htmlToPlainText(item.html)),
+    ...payload.tables.map((table) => tableClipboardText(table, []))].join('\n')
+}
+
+function tableClipboardText(table: TableItem, selectedCells: string[]) {
+  if (!selectedCells.length) return table.cells.map((row) => row.map((cell) => cell.text).join('\t')).join('\n')
+  return selectedCells.map((key) => {
+    const [row, column] = key.split(':').map(Number)
+    return table.cells[row]?.[column]?.text ?? ''
+  }).join('\n')
+}
+
+function mergeTableCells(table: TableItem, selectedCells: string[]) {
+  if (selectedCells.length < 2) return null
+  const coordinates = selectedCells.map((key) => key.split(':').map(Number))
+  let top = Math.min(...coordinates.map(([row]) => row))
+  let bottom = Math.max(...coordinates.map(([row]) => row))
+  let left = Math.min(...coordinates.map(([, column]) => column))
+  let right = Math.max(...coordinates.map(([, column]) => column))
+  let expanded = true
+  while (expanded) {
+    expanded = false
+    for (let row = top; row <= bottom; row += 1) {
+      for (let column = left; column <= right; column += 1) {
+        const key = table.cells[row]?.[column]?.mergedInto ?? `${row}:${column}`
+        const [anchorRow, anchorColumn] = key.split(':').map(Number)
+        const anchor = table.cells[anchorRow]?.[anchorColumn]
+        if (!anchor) continue
+        const nextTop = Math.min(top, anchorRow)
+        const nextBottom = Math.max(bottom, anchorRow + (anchor.rowSpan ?? 1) - 1)
+        const nextLeft = Math.min(left, anchorColumn)
+        const nextRight = Math.max(right, anchorColumn + (anchor.colSpan ?? 1) - 1)
+        if (nextTop !== top || nextBottom !== bottom || nextLeft !== left || nextRight !== right) {
+          top = nextTop; bottom = nextBottom; left = nextLeft; right = nextRight
+          expanded = true
+        }
+      }
+    }
+  }
+  const cells = table.cells.map((row) => row.map((cell) => ({ ...cell })))
+  const text: string[] = []
+  for (let row = top; row <= bottom; row += 1) {
+    for (let column = left; column <= right; column += 1) {
+      const cell = cells[row][column]
+      if (!cell.mergedInto && cell.text) text.push(cell.text)
+      if (row !== top || column !== left) cells[row][column] = {
+        ...cell, text: '', rowSpan: undefined, colSpan: undefined, mergedInto: `${top}:${left}`,
+      }
+    }
+  }
+  cells[top][left] = { ...cells[top][left], text: text.join('\n'), rowSpan: bottom - top + 1,
+    colSpan: right - left + 1, mergedInto: undefined }
+  return { cells, rowHeights: table.rowHeights.map((height, row) => row >= top && row <= bottom
+    ? table.rowMinHeights?.[row] ?? table.cellHeight : height),
+    anchor: `${top}:${left}` }
+}
+
+function splitTableCells(table: TableItem, selectedCells: string[]) {
+  const cells = table.cells.map((row) => row.map((cell) => ({ ...cell })))
+  const selection = new Set(selectedCells)
+  let changed = false
+  for (const key of selectedCells) {
+    const [row, column] = key.split(':').map(Number)
+    const cell = cells[row]?.[column]
+    if (!cell || (cell.rowSpan ?? 1) === 1 && (cell.colSpan ?? 1) === 1) continue
+    for (let y = row; y < row + (cell.rowSpan ?? 1); y += 1) {
+      for (let x = column; x < column + (cell.colSpan ?? 1); x += 1) {
+        selection.add(`${y}:${x}`)
+        cells[y][x] = { ...cells[y][x], rowSpan: undefined, colSpan: undefined, mergedInto: undefined }
+      }
+    }
+    changed = true
+  }
+  return changed ? { cells, selection: [...selection] } : null
+}
+
+type TableLineSelection = { axis: 'row' | 'column'; index: number }
+
+function removeTableLine(table: TableItem, { axis, index }: TableLineSelection): TableItem | null {
+  const rows = table.cells.length
+  const columns = table.cells[0]?.length ?? 0
+  if (axis === 'row' ? rows <= 1 : columns <= 1) return null
+  const rowIndex = (row: number) => axis === 'row' && row > index ? row - 1 : row
+  const columnIndex = (column: number) => axis === 'column' && column > index ? column - 1 : column
+  const cells: TableCellData[][] = table.cells.filter((_, row) => axis !== 'row' || row !== index)
+    .map((line) => line.filter((_, column) => axis !== 'column' || column !== index)
+      .map((cell) => ({ ...cell, rowSpan: undefined, colSpan: undefined, mergedInto: undefined })))
+
+  for (let row = 0; row < rows; row += 1) {
+    for (let column = 0; column < columns; column += 1) {
+      const cell = table.cells[row][column]
+      if (cell.mergedInto) continue
+      const keptRows = Array.from({ length: cell.rowSpan ?? 1 }, (_, offset) => row + offset)
+        .filter((value) => axis !== 'row' || value !== index)
+      const keptColumns = Array.from({ length: cell.colSpan ?? 1 }, (_, offset) => column + offset)
+        .filter((value) => axis !== 'column' || value !== index)
+      if (!keptRows.length || !keptColumns.length) continue
+      const firstRow = rowIndex(keptRows[0])
+      const firstColumn = columnIndex(keptColumns[0])
+      const anchor = `${firstRow}:${firstColumn}`
+      cells[firstRow][firstColumn] = { ...cell,
+        rowSpan: keptRows.length > 1 ? keptRows.length : undefined,
+        colSpan: keptColumns.length > 1 ? keptColumns.length : undefined,
+        mergedInto: undefined }
+      for (const keptRow of keptRows) {
+        for (const keptColumn of keptColumns) {
+          const nextRow = rowIndex(keptRow)
+          const nextColumn = columnIndex(keptColumn)
+          if (nextRow === firstRow && nextColumn === firstColumn) continue
+          cells[nextRow][nextColumn] = { ...cells[nextRow][nextColumn], text: '',
+            rowSpan: undefined, colSpan: undefined, mergedInto: anchor }
+        }
+      }
+    }
+  }
+
+  return { ...table, cells,
+    rowHeights: axis === 'row' ? table.rowHeights.filter((_, row) => row !== index) : [...table.rowHeights],
+    rowMinHeights: axis === 'row' ? table.rowMinHeights?.filter((_, row) => row !== index)
+      : table.rowMinHeights ? [...table.rowMinHeights] : undefined,
+    columnWidths: axis === 'column' ? tableColumnWidths(table).filter((_, column) => column !== index)
+      : [...tableColumnWidths(table)] }
 }
 
 function normalizeLayerOrder(order: string[], objectIds: string[]) {
@@ -237,10 +362,13 @@ export default function BoardCanvas() {
   const zoomRef = useRef<(factor: number) => void>(() => {})
   const textModeRef = useRef(false)
   const stickerModeRef = useRef<StickerStyle | null>(null)
+  const tableModeRef = useRef<TableSize | null>(null)
   const drawingModeRef = useRef<DrawingStyle | null>(null)
   const navigationModeRef = useRef<NavigationMode>('cursor')
   const textsRef = useRef<TextItem[]>([])
   const stickersRef = useRef<StickerItem[]>([])
+  const tablesRef = useRef<TableItem[]>([])
+  const tableCellAnchorRef = useRef<{ tableId: string; row: number; column: number } | null>(null)
   const drawingsRef = useRef<DrawingItem[]>([])
   const connectableItemsRef = useRef<ConnectableItem[]>([])
   const arrowsRef = useRef<Arrow[]>([])
@@ -264,6 +392,10 @@ export default function BoardCanvas() {
   const [viewState, setViewState] = useState<View | null>(null)
   const [texts, setTexts] = useState<TextItem[]>([])
   const [stickers, setStickers] = useState<StickerItem[]>([])
+  const [tables, setTables] = useState<TableItem[]>([])
+  const [selectedTableId, setSelectedTableId] = useState<string | null>(null)
+  const [selectedTableCells, setSelectedTableCells] = useState<string[]>([])
+  const [selectedTableLine, setSelectedTableLine] = useState<TableLineSelection | null>(null)
   const [drawings, setDrawings] = useState<DrawingItem[]>([])
   const [drawingStyle, setDrawingStyle] = useState<DrawingStyle | null>(null)
   const [drawingDraft, setDrawingDraft] = useState<DrawingDraft | null>(null)
@@ -289,28 +421,22 @@ export default function BoardCanvas() {
   const allObjectIds = useMemo(() => [
     ...drawings.map((item) => item.id),
     ...stickers.map((item) => item.id),
+    ...tables.map((item) => item.id),
     ...texts.map((item) => item.id),
     ...arrows.map((item) => item.id),
-  ], [drawings, stickers, texts, arrows])
+  ], [drawings, stickers, tables, texts, arrows])
   const orderedObjectIds = useMemo(() => normalizeLayerOrder(layerOrder, allObjectIds), [layerOrder, allObjectIds])
   const objectLayers = useMemo(() => new Map(orderedObjectIds.map((id, index) => [id, index + 1])), [orderedObjectIds])
-  const selectedLayerIds = useMemo(() => selectedArrowId ? [selectedArrowId]
+  const selectedLayerIds = useMemo(() => selectedTableId ? [selectedTableId]
+    : selectedArrowId ? [selectedArrowId]
     : selectedDrawingId ? [selectedDrawingId]
       : selectedStickerId ? [selectedStickerId]
         : multiSelectedIds.length ? multiSelectedIds
           : selectedId ? [selectedId] : [],
-  [selectedArrowId, selectedDrawingId, selectedStickerId, multiSelectedIds, selectedId])
+  [selectedTableId, selectedArrowId, selectedDrawingId, selectedStickerId, multiSelectedIds, selectedId])
   const changeObjectLayer = (ids: string[], action: LayerAction) => {
     setLayerOrder((current) => reorderLayers(normalizeLayerOrder(current, allObjectIds), ids, action))
   }
-
-  useEffect(() => {
-    setLayerOrder((current) => {
-      const normalized = normalizeLayerOrder(current, allObjectIds)
-      return normalized.length === current.length && normalized.every((id, index) => id === current[index])
-        ? current : normalized
-    })
-  }, [allObjectIds])
 
   const addStickerAtClient = (sticker: StickerStyle, clientX: number, clientY: number) => {
     const board = boardRef.current
@@ -341,6 +467,7 @@ export default function BoardCanvas() {
   const connectableItems = [...texts, ...stickers]
   textsRef.current = texts
   stickersRef.current = stickers
+  tablesRef.current = tables
   drawingsRef.current = drawings
   connectableItemsRef.current = connectableItems
   arrowsRef.current = arrows
@@ -558,6 +685,7 @@ export default function BoardCanvas() {
     groupTransformStartRef.current = {
       texts: texts.filter((item) => selected.has(item.id)).map((item) => ({ ...item })),
       stickers: stickers.filter((item) => selected.has(item.id)).map((item) => ({ ...item })),
+      tables: tables.filter((item) => selected.has(item.id)).map((item) => ({ ...item })),
       drawings: drawings.filter((item) => selected.has(item.id)).map((item) => ({ ...item,
         points: item.points.map((point) => ({ ...point })) })),
       arrows: arrows.filter((item) => selected.has(item.id)).map((item) => ({ ...item,
@@ -569,7 +697,8 @@ export default function BoardCanvas() {
 
   const moveSelectedObjects = (startItems: GroupSelectionItem[], requestedDx: number, requestedDy: number) => {
     const snapshot = groupTransformStartRef.current
-    if (!snapshot?.texts.length && !snapshot?.stickers.length && !snapshot?.drawings.length && !snapshot?.arrows.length) return
+    if (!snapshot?.texts.length && !snapshot?.stickers.length && !snapshot?.tables.length
+      && !snapshot?.drawings.length && !snapshot?.arrows.length) return
     const left = Math.min(...startItems.map((item) => item.x))
     const top = Math.min(...startItems.map((item) => item.y))
     const right = Math.max(...startItems.map((item) => item.x + item.width))
@@ -578,6 +707,7 @@ export default function BoardCanvas() {
     const dy = Math.max(-top, Math.min(BOARD_HEIGHT - bottom, requestedDy))
     const textStarts = new Map(snapshot.texts.map((item) => [item.id, item]))
     const stickerStarts = new Map(snapshot.stickers.map((item) => [item.id, item]))
+    const tableStarts = new Map(snapshot.tables.map((item) => [item.id, item]))
     const drawingStarts = new Map(snapshot.drawings.map((item) => [item.id, item]))
     const arrowStarts = new Map(snapshot.arrows.map((item) => [item.id, item]))
     setTexts((current) => current.map((item) => {
@@ -586,6 +716,10 @@ export default function BoardCanvas() {
     }))
     setStickers((current) => current.map((item) => {
       const start = stickerStarts.get(item.id)
+      return start ? { ...item, x: start.x + dx, y: start.y + dy } : item
+    }))
+    setTables((current) => current.map((item) => {
+      const start = tableStarts.get(item.id)
       return start ? { ...item, x: start.x + dx, y: start.y + dy } : item
     }))
     setDrawings((current) => current.map((item) => {
@@ -612,6 +746,7 @@ export default function BoardCanvas() {
       y: anchorY + (point.y - anchorY) * factor })
     const textStarts = new Map(snapshot.texts.map((item) => [item.id, item]))
     const stickerStarts = new Map(snapshot.stickers.map((item) => [item.id, item]))
+    const tableStarts = new Map(snapshot.tables.map((item) => [item.id, item]))
     const drawingStarts = new Map(snapshot.drawings.map((item) => [item.id, item]))
     const arrowStarts = new Map(snapshot.arrows.map((item) => [item.id, item]))
     const selectedConnectables = new Set([...snapshot.texts, ...snapshot.stickers].map((item) => item.id))
@@ -627,6 +762,13 @@ export default function BoardCanvas() {
       const start = stickerStarts.get(item.id)
       if (!start) return item
       return { ...item, ...scalePoint(start), width: start.width * factor, height: start.height * factor }
+    }))
+    setTables((current) => current.map((item) => {
+      const start = tableStarts.get(item.id)
+      return start ? { ...item, ...scalePoint(start), cellWidth: start.cellWidth * factor,
+        columnWidths: tableColumnWidths(start).map((width) => width * factor),
+        cellHeight: start.cellHeight * factor, rowHeights: start.rowHeights.map((height) => height * factor),
+        rowMinHeights: start.rowMinHeights?.map((height) => height * factor) } : item
     }))
     setDrawings((current) => current.map((item) => {
       const start = drawingStarts.get(item.id)
@@ -674,12 +816,14 @@ export default function BoardCanvas() {
   }
 
   const applyObjectSelection = (ids: string[]) => {
+    setSelectedTableCells([])
     const existing = new Set(allObjectIds)
     const unique = [...new Set(ids)].filter((id) => existing.has(id))
     const single = unique.length === 1 ? unique[0] : null
     setMultiSelectedIds(unique.length > 1 ? unique : [])
     setSelectedId(single && texts.some((item) => item.id === single) ? single : null)
     setSelectedStickerId(single && stickers.some((item) => item.id === single) ? single : null)
+    setSelectedTableId(single && tables.some((item) => item.id === single) ? single : null)
     setSelectedDrawingId(single && drawings.some((item) => item.id === single) ? single : null)
     setSelectedArrowId(single && arrows.some((item) => item.id === single) ? single : null)
     setEditingId(null)
@@ -692,6 +836,7 @@ export default function BoardCanvas() {
     clearTextSelection()
     const current = multiSelectedIds.length ? multiSelectedIds
       : selectedId ? [selectedId]
+        : selectedTableId ? [selectedTableId]
         : selectedStickerId ? [selectedStickerId]
           : selectedDrawingId ? [selectedDrawingId]
             : selectedArrowId ? [selectedArrowId] : []
@@ -700,6 +845,8 @@ export default function BoardCanvas() {
 
   const selectText = (id: string, additive = false) => {
     if (additive) { toggleObjectSelection(id); return }
+    setSelectedTableId(null)
+    setSelectedTableCells([])
     setSelectedArrowId(null)
     setSelectedStickerId(null)
     setSelectedDrawingId(null)
@@ -720,6 +867,8 @@ export default function BoardCanvas() {
 
   const selectSticker = (id: string, additive = false) => {
     if (additive) { toggleObjectSelection(id); return }
+    setSelectedTableId(null)
+    setSelectedTableCells([])
     const editor = editingId ? editorRefs.current.get(editingId) : null
     if (editor && document.activeElement === editor) editor.blur()
     clearTextSelection()
@@ -734,6 +883,8 @@ export default function BoardCanvas() {
 
   const selectDrawing = (id: string, additive = false) => {
     if (additive) { toggleObjectSelection(id); return }
+    setSelectedTableId(null)
+    setSelectedTableCells([])
     clearTextSelection()
     setSelectedArrowId(null)
     setSelectedStickerId(null)
@@ -746,6 +897,8 @@ export default function BoardCanvas() {
 
   const selectArrow = (id: string, additive = false) => {
     if (additive) { toggleObjectSelection(id); return }
+    setSelectedTableId(null)
+    setSelectedTableCells([])
     clearTextSelection()
     setSelectedArrowId(id)
     setSelectedStickerId(null)
@@ -777,6 +930,138 @@ export default function BoardCanvas() {
 
   const changeSticker = (id: string, changes: Partial<StickerItem>) => {
     setStickers((current) => current.map((sticker) => sticker.id === id ? { ...sticker, ...changes } : sticker))
+  }
+
+  const selectTable = (id: string, clearCells = true) => {
+    if (clearCells && document.activeElement instanceof HTMLTextAreaElement
+      && document.activeElement.classList.contains('board-table__cell')) document.activeElement.blur()
+    clearTextSelection()
+    setSelectedTableId(id)
+    if (clearCells) {
+      setSelectedTableCells([])
+      setSelectedTableLine(null)
+    }
+    setSelectedId(null)
+    setSelectedStickerId(null)
+    setSelectedDrawingId(null)
+    setSelectedArrowId(null)
+    setMultiSelectedIds([])
+    setEditingId(null)
+    setEditingStickerId(null)
+  }
+
+  const selectTableCell = (id: string, row: number, column: number, additive: boolean, range: boolean) => {
+    const previousTable = selectedTableId
+    selectTable(id, false)
+    setSelectedTableLine(null)
+    const table = tables.find((item) => item.id === id)
+    const anchorKey = (y: number, x: number) => table?.cells[y]?.[x]?.mergedInto ?? `${y}:${x}`
+    const key = anchorKey(row, column)
+    const anchor = tableCellAnchorRef.current
+    if (range && anchor?.tableId === id) {
+      const next = new Set<string>()
+      for (let y = Math.min(anchor.row, row); y <= Math.max(anchor.row, row); y += 1) {
+        for (let x = Math.min(anchor.column, column); x <= Math.max(anchor.column, column); x += 1) next.add(anchorKey(y, x))
+      }
+      setSelectedTableCells([...next])
+    } else if (additive && previousTable === id) {
+      setSelectedTableCells((current) => current.includes(key) ? current.filter((cell) => cell !== key) : [...current, key])
+      tableCellAnchorRef.current = { tableId: id, row, column }
+    } else {
+      setSelectedTableCells([key])
+      tableCellAnchorRef.current = { tableId: id, row, column }
+    }
+  }
+
+  const selectTableLine = (id: string, axis: 'row' | 'column', index: number) => {
+    const table = tables.find((item) => item.id === id)
+    if (!table) return
+    if (document.activeElement instanceof HTMLTextAreaElement
+      && document.activeElement.classList.contains('board-table__cell')) document.activeElement.blur()
+    selectTable(id, false)
+    const keys = axis === 'row'
+      ? table.cells[index].map((_, column) => `${index}:${column}`)
+      : table.cells.map((_, row) => `${row}:${index}`)
+    const anchors = [...new Set(keys.map((key) => {
+      const [row, column] = key.split(':').map(Number)
+      return table.cells[row][column].mergedInto ?? key
+    }))]
+    setSelectedTableCells(anchors)
+    setSelectedTableLine({ axis, index })
+    const [row, column] = anchors[0].split(':').map(Number)
+    tableCellAnchorRef.current = { tableId: id, row, column }
+  }
+
+  const changeTable = (id: string, changes: Partial<TableItem>) => {
+    setTables((current) => current.map((table) => table.id === id ? { ...table, ...changes } : table))
+  }
+
+  const changeTableRowHeight = (id: string, row: number, height: number) => {
+    setTables((current) => current.map((table) => {
+      if (table.id !== id || Math.abs(table.rowHeights[row] - height) < 1) return table
+      const rowHeights = [...table.rowHeights]
+      rowHeights[row] = height
+      const totalHeight = rowHeights.reduce((total, currentHeight) => total + currentHeight, 0)
+      return { ...table, rowHeights, y: Math.max(0, Math.min(table.y, BOARD_HEIGHT - totalHeight)) }
+    }))
+  }
+
+  const changeTableFontSize = (id: string, fontSize: number) => {
+    setTables((current) => current.map((table) => table.id === id
+      ? { ...table, fontSize: Math.max(MIN_FONT_SIZE, Math.min(MAX_FONT_SIZE, fontSize)) } : table))
+  }
+
+  const changeSelectedTableCells = (changes: Partial<TableCellData>) => {
+    if (!selectedTableId || !selectedTableCells.length) return
+    const selected = new Set(selectedTableCells)
+    setTables((current) => current.map((table) => table.id === selectedTableId
+      ? { ...table, cells: table.cells.map((row, rowIndex) => row.map((cell, columnIndex) =>
+        selected.has(`${rowIndex}:${columnIndex}`) ? { ...cell, ...changes } : cell)) }
+      : table))
+  }
+
+  const mergeSelectedTableCells = () => {
+    if (!selectedTableId) return
+    const table = tables.find((item) => item.id === selectedTableId)
+    if (!table) return
+    const merged = mergeTableCells(table, selectedTableCells)
+    if (!merged) return
+    changeTable(table.id, { cells: merged.cells, rowHeights: merged.rowHeights })
+    setSelectedTableCells([merged.anchor])
+    setSelectedTableLine(null)
+    tableCellAnchorRef.current = { tableId: table.id, row: Number(merged.anchor.split(':')[0]),
+      column: Number(merged.anchor.split(':')[1]) }
+  }
+
+  const splitSelectedTableCells = () => {
+    if (!selectedTableId) return
+    const table = tables.find((item) => item.id === selectedTableId)
+    if (!table) return
+    const split = splitTableCells(table, selectedTableCells)
+    if (!split) return
+    changeTable(table.id, { cells: split.cells })
+    setSelectedTableCells(split.selection)
+    setSelectedTableLine(null)
+  }
+
+  const deleteTable = (id: string) => {
+    setTables((current) => current.filter((table) => table.id !== id))
+    setSelectedTableId(null)
+    setSelectedTableCells([])
+    setSelectedTableLine(null)
+  }
+
+  const deleteSelectedTableLine = () => {
+    if (!selectedTableId || !selectedTableLine) return
+    const table = tables.find((item) => item.id === selectedTableId)
+    if (!table) return
+    const next = removeTableLine(table, selectedTableLine)
+    if (next) {
+      setTables((current) => current.map((item) => item.id === table.id ? next : item))
+      setSelectedTableCells([])
+      setSelectedTableLine(null)
+      tableCellAnchorRef.current = null
+    } else deleteTable(table.id)
   }
 
   const saveStickerSelection = () => {
@@ -948,11 +1233,13 @@ export default function BoardCanvas() {
     const deleted = new Set(ids)
     setTexts((current) => current.filter((item) => !deleted.has(item.id)))
     setStickers((current) => current.filter((item) => !deleted.has(item.id)))
+    setTables((current) => current.filter((item) => !deleted.has(item.id)))
     setDrawings((current) => current.filter((item) => !deleted.has(item.id)))
     setArrows((current) => current.filter((arrow) => !deleted.has(arrow.id)
       && !deleted.has(arrow.tail.textId ?? '') && !deleted.has(arrow.head.textId ?? '')))
     setSelectedId(null)
     setSelectedStickerId(null)
+    setSelectedTableId(null)
     setSelectedDrawingId(null)
     setSelectedArrowId(null)
     setMultiSelectedIds([])
@@ -965,12 +1252,17 @@ export default function BoardCanvas() {
 
   const selectedObjectClipboard = (): ObjectClipboard | null => {
     if (selectedArrowId) return null
+    if (selectedTableId) {
+      const table = tables.find((item) => item.id === selectedTableId)
+      return table ? { version: 1, texts: [], stickers: [], tables: [table], arrows: [], drawings: [] } : null
+    }
     if (selectedStickerId) {
       const sticker = stickers.find((item) => item.id === selectedStickerId)
       return sticker ? {
         version: 1,
         texts: [],
         stickers: [{ ...sticker, html: stickerEditorRefs.current.get(sticker.id)?.innerHTML ?? sticker.html }],
+        tables: [],
         arrows: [],
         drawings: [],
       } : null
@@ -981,6 +1273,7 @@ export default function BoardCanvas() {
         version: 1,
         texts: [],
         stickers: [],
+        tables: [],
         arrows: [],
         drawings: [{ ...drawing, points: drawing.points.map((point) => ({ ...point })) }],
       } : null
@@ -992,6 +1285,7 @@ export default function BoardCanvas() {
       texts: texts.filter((item) => ids.has(item.id)).map((item) => ({ ...item, html: editorRefs.current.get(item.id)?.innerHTML ?? item.html })),
       stickers: stickers.filter((item) => ids.has(item.id)).map((item) => ({ ...item,
         html: stickerEditorRefs.current.get(item.id)?.innerHTML ?? item.html })),
+      tables: tables.filter((item) => ids.has(item.id)),
       arrows: [],
       drawings: drawings.filter((item) => ids.has(item.id)).map((item) => ({ ...item,
         points: item.points.map((point) => ({ ...point })) })),
@@ -1011,15 +1305,16 @@ export default function BoardCanvas() {
     document.addEventListener('copy', copy, { capture: true, once: true })
     const copied = document.execCommand('copy')
     document.removeEventListener('copy', copy, true)
-    if (!copied) void navigator.clipboard?.writeText(plainText)
+    if (!copied) void navigator.clipboard?.writeText(OBJECT_CLIPBOARD_PREFIX + json).catch(() => {})
   }
 
   const pasteObjects = (payload: ObjectClipboard) => {
-    if (!payload.texts.length && !payload.stickers.length && !payload.drawings.length) return
+    if (!payload.texts.length && !payload.stickers.length && !payload.tables.length && !payload.drawings.length) return
     const view = viewRef.current
     const offset = 24 * ++pasteCountRef.current / (view?.scale ?? 1)
     const sourceTexts = payload.texts
     const sourceStickers = payload.stickers
+    const sourceTables = payload.tables
     const sourceDrawings = payload.drawings
     const bounds: Point[] = sourceTexts.flatMap((item) => [
       { x: item.x, y: item.y }, { x: item.x + item.width, y: item.y + item.height },
@@ -1027,6 +1322,9 @@ export default function BoardCanvas() {
       { x: item.x, y: item.y }, { x: item.x + item.width, y: item.y + item.height },
     ])).concat(sourceStickers.flatMap((item) => [
       { x: item.x, y: item.y }, { x: item.x + item.width, y: item.y + item.height },
+    ])).concat(sourceTables.flatMap((item) => [
+      { x: item.x, y: item.y },
+      { x: item.x + tableWidth(item), y: item.y + tableHeight(item) },
     ]))
     const minX = Math.min(...bounds.map((point) => point.x))
     const maxX = Math.max(...bounds.map((point) => point.x))
@@ -1037,18 +1335,27 @@ export default function BoardCanvas() {
     const idMap = new Map(sourceTexts.map((item) => [item.id, crypto.randomUUID()]))
     const newTexts = sourceTexts.map((item) => constrainText({ ...item, id: idMap.get(item.id)!, x: item.x + dx, y: item.y + dy }, view, viewportHeight()))
     const newStickers = sourceStickers.map((item) => ({ ...item, id: crypto.randomUUID(), x: item.x + dx, y: item.y + dy }))
+    const newTables = sourceTables.map((item) => ({ ...item, id: crypto.randomUUID(), x: item.x + dx, y: item.y + dy,
+      columnWidths: [...tableColumnWidths(item)], rowHeights: [...item.rowHeights],
+      rowMinHeights: item.rowMinHeights ? [...item.rowMinHeights] : undefined,
+      cells: item.cells.map((row) => row.map((cell) => ({ ...cell }))) }))
     const newDrawings = sourceDrawings.map((item) => ({ ...item, id: crypto.randomUUID(),
       x: item.x + dx, y: item.y + dy, points: item.points.map((point) => ({ ...point })) }))
     setTexts((current) => [...current, ...newTexts])
     setStickers((current) => [...current, ...newStickers])
+    setTables((current) => [...current, ...newTables])
     setDrawings((current) => [...current, ...newDrawings])
     setEditingId(null)
     setFocusId(null)
-    const newIds = [...newDrawings.map((item) => item.id), ...newStickers.map((item) => item.id), ...newTexts.map((item) => item.id)]
+    const newIds = [...newDrawings.map((item) => item.id), ...newStickers.map((item) => item.id),
+      ...newTables.map((item) => item.id), ...newTexts.map((item) => item.id)]
     setMultiSelectedIds(newIds.length > 1 ? newIds : [])
     setSelectedId(newIds.length === 1 && newTexts.length === 1 ? newTexts[0].id : null)
     setSelectedDrawingId(newIds.length === 1 && newDrawings.length === 1 ? newDrawings[0].id : null)
     setSelectedStickerId(newIds.length === 1 && newStickers.length === 1 ? newStickers[0].id : null)
+    setSelectedTableId(newIds.length === 1 && newTables.length === 1 ? newTables[0].id : null)
+    setSelectedTableCells([])
+    setSelectedTableLine(null)
     setEditingStickerId(null)
     setFocusStickerId(null)
     setSelectedArrowId(null)
@@ -1058,7 +1365,25 @@ export default function BoardCanvas() {
     const editableTarget = (target: EventTarget | null) => target instanceof HTMLElement
       && (target.isContentEditable || Boolean(target.closest('input, textarea, select')))
     const onCopy = (event: ClipboardEvent) => {
-      if (event.defaultPrevented || editableTarget(event.target) || navigationMode !== 'cursor') return
+      const readOnlyTableCell = event.target instanceof HTMLTextAreaElement
+        && event.target.classList.contains('board-table__cell') && event.target.readOnly
+      if (event.defaultPrevented || (editableTarget(event.target) && !readOnlyTableCell) || navigationMode !== 'cursor') return
+      if (selectedTableId) {
+        const table = tables.find((item) => item.id === selectedTableId)
+        if (!table) return
+        event.preventDefault()
+        if (selectedTableCells.length) {
+          event.clipboardData?.setData('text/plain', tableClipboardText(table, selectedTableCells))
+        } else {
+          const payload = selectedObjectClipboard()
+          if (!payload) return
+          objectClipboardRef.current = payload
+          pasteCountRef.current = 0
+          event.clipboardData?.setData(OBJECT_CLIPBOARD_TYPE, JSON.stringify(payload))
+          event.clipboardData?.setData('text/plain', objectClipboardPlainText(payload))
+        }
+        return
+      }
       if (selectedArrowId) { event.preventDefault(); return }
       const payload = selectedObjectClipboard()
       if (!payload) return
@@ -1070,7 +1395,9 @@ export default function BoardCanvas() {
       pasteCountRef.current = 0
     }
     const onPaste = (event: ClipboardEvent) => {
-      if (event.defaultPrevented || editableTarget(event.target) || navigationMode !== 'cursor') return
+      const readOnlyTableCell = event.target instanceof HTMLTextAreaElement
+        && event.target.classList.contains('board-table__cell') && event.target.readOnly
+      if (event.defaultPrevented || (editableTarget(event.target) && !readOnlyTableCell) || navigationMode !== 'cursor') return
       const custom = event.clipboardData?.getData(OBJECT_CLIPBOARD_TYPE)
       const plain = event.clipboardData?.getData('text/plain')
       const payload = custom ? parseObjectClipboard(custom)
@@ -1083,7 +1410,8 @@ export default function BoardCanvas() {
     window.addEventListener('copy', onCopy)
     window.addEventListener('paste', onPaste)
     return () => { window.removeEventListener('copy', onCopy); window.removeEventListener('paste', onPaste) }
-  }, [texts, stickers, arrows, drawings, selectedId, multiSelectedIds, selectedStickerId, selectedArrowId, selectedDrawingId, navigationMode])
+  }, [texts, stickers, tables, arrows, drawings, selectedId, multiSelectedIds, selectedStickerId,
+    selectedTableId, selectedTableCells, selectedArrowId, selectedDrawingId, navigationMode])
 
   useEffect(() => {
     if (!boardContextMenu) return
@@ -1166,6 +1494,36 @@ export default function BoardCanvas() {
     window.addEventListener('keydown', onDrawingKey)
     return () => window.removeEventListener('keydown', onDrawingKey)
   }, [selectedDrawingId, navigationMode])
+
+  useEffect(() => {
+    if (!selectedTableId || navigationMode !== 'cursor') return
+    const onTableKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') { setSelectedTableId(null); return }
+      if (event.key !== 'Delete' || event.defaultPrevented) return
+      const target = event.target
+      if (target instanceof HTMLElement && target.closest('input, select, [contenteditable="true"]')) return
+      if (target instanceof HTMLTextAreaElement && (!target.classList.contains('board-table__cell') || !target.readOnly)) return
+      if (event.ctrlKey) {
+        if (!selectedTableLine) return
+        event.preventDefault()
+        deleteSelectedTableLine()
+        return
+      }
+      event.preventDefault()
+      if (selectedTableCells.length) changeSelectedTableCells({ text: '' })
+      else deleteTable(selectedTableId)
+    }
+    window.addEventListener('keydown', onTableKey)
+    return () => window.removeEventListener('keydown', onTableKey)
+  }, [selectedTableId, selectedTableCells, selectedTableLine, tables, navigationMode])
+
+  useEffect(() => { if (!selectedTableId) setSelectedTableLine(null) }, [selectedTableId])
+
+  useEffect(() => {
+    if (!selectedTableId || selectedTableCells.length) return
+    const active = document.activeElement
+    if (active instanceof HTMLTextAreaElement && active.classList.contains('board-table__cell')) active.blur()
+  }, [selectedTableId, selectedTableCells.length])
 
   useEffect(() => {
     if (!selectedLayerIds.length || navigationMode !== 'cursor') return
@@ -1454,6 +1812,26 @@ export default function BoardCanvas() {
         setResetToCursorToken((current) => current + 1)
         return
       }
+      if (navigationModeRef.current === 'cursor' && tableModeRef.current) {
+        event.preventDefault()
+        const view = viewRef.current
+        if (!view) return
+        const { rows, columns } = tableModeRef.current
+        const bounds = board.getBoundingClientRect()
+        const width = columns * TABLE_CELL_WIDTH
+        const height = rows * TABLE_CELL_HEIGHT
+        const x = Math.max(0, Math.min(BOARD_WIDTH - width, (event.clientX - bounds.left - view.x) / view.scale))
+        const y = Math.max(0, Math.min(BOARD_HEIGHT - height, (event.clientY - bounds.top - view.y) / view.scale))
+        const id = crypto.randomUUID()
+        setTables((current) => [...current, { id, x, y, cellWidth: TABLE_CELL_WIDTH,
+          columnWidths: Array(columns).fill(TABLE_CELL_WIDTH), cellHeight: TABLE_CELL_HEIGHT,
+          rowHeights: Array(rows).fill(TABLE_CELL_HEIGHT), rowMinHeights: Array(rows).fill(TABLE_CELL_HEIGHT), fontSize: 16,
+          cells: Array.from({ length: rows }, () => Array.from({ length: columns }, createTableCell)) }])
+        selectTable(id)
+        tableModeRef.current = null
+        setResetToCursorToken((current) => current + 1)
+        return
+      }
       if (navigationModeRef.current === 'cursor' && textModeRef.current) {
         event.preventDefault()
         clearTextSelection()
@@ -1471,6 +1849,7 @@ export default function BoardCanvas() {
           align: 'left', opacity: 1, comment: '',
         }])
         setSelectedId(id)
+        setSelectedTableId(null)
         setMultiSelectedIds([])
         setEditingId(id)
         setFocusId(id)
@@ -1491,6 +1870,8 @@ export default function BoardCanvas() {
         document.activeElement instanceof HTMLElement && document.activeElement.blur()
         clearTextSelection()
         setSelectedArrowId(null)
+        setSelectedTableId(null)
+        setSelectedTableCells([])
         setSelectedStickerId(null)
         setSelectedDrawingId(null)
         setSelectedId(null)
@@ -1582,16 +1963,20 @@ export default function BoardCanvas() {
             item.x < right && item.x + item.width > left && item.y < bottom && item.y + item.height > top
           const textIds = textsRef.current.filter(overlaps).map((item) => item.id)
           const stickerIds = stickersRef.current.filter(overlaps).map((item) => item.id)
+          const tableIds = tablesRef.current.filter((item) => overlaps({ x: item.x, y: item.y,
+            width: tableWidth(item), height: tableHeight(item) })).map((item) => item.id)
           const drawingIds = drawingsRef.current.filter(overlaps).map((item) => item.id)
           const arrowIds = arrowsRef.current.filter((arrow) => {
             const geometry = arrowGeometriesRef.current.get(arrow.id)
             if (!geometry) return false
             return overlaps(arrowSelectionBounds(geometry, 8 / view.scale))
           }).map((arrow) => arrow.id)
-          const ids = [...drawingIds, ...stickerIds, ...textIds, ...arrowIds]
+          const ids = [...drawingIds, ...stickerIds, ...tableIds, ...textIds, ...arrowIds]
           const single = ids.length === 1 ? ids[0] : null
           setSelectedId(single && textIds.includes(single) ? single : null)
           setSelectedStickerId(single && stickerIds.includes(single) ? single : null)
+          setSelectedTableId(single && tableIds.includes(single) ? single : null)
+          setSelectedTableCells([])
           setSelectedDrawingId(single && drawingIds.includes(single) ? single : null)
           setSelectedArrowId(single && arrowIds.includes(single) ? single : null)
           setMultiSelectedIds(ids.length > 1 ? ids : [])
@@ -1640,6 +2025,14 @@ export default function BoardCanvas() {
   const selectedTexts = textOnlyMultiSelection ? multiSelectedTexts : texts.filter((item) => item.id === selectedId)
   const selectedText = selectedTexts[0]
   const selectedSticker = stickers.find((sticker) => sticker.id === selectedStickerId)
+  const selectedTable = tables.find((table) => table.id === selectedTableId)
+  const selectedTableCellCoordinates = selectedTableCells.map((key) => key.split(':').map(Number))
+  const activeTableCells = selectedTableCellCoordinates.map(([row, column]) => selectedTable?.cells[row]?.[column])
+    .filter((cell): cell is TableCellData => Boolean(cell))
+  const tableToolbarCenterX = selectedTable && viewState
+    ? viewState.x + (selectedTable.x + tableWidth(selectedTable) / 2) * viewState.scale : 0
+  const tableToolbarTop = selectedTable && viewState
+    ? Math.max(12, viewState.y + selectedTable.y * viewState.scale - (80 + 8 * viewState.scale)) : 12
   const selectedDrawing = drawings.find((drawing) => drawing.id === selectedDrawingId)
   const selectedArrow = arrows.find((arrow) => arrow.id === selectedArrowId)
   const selectedGroupItems: GroupSelectionItem[] = []
@@ -1654,6 +2047,14 @@ export default function BoardCanvas() {
     if (sticker) {
       selectedGroupItems.push({ id, kind: 'sticker', x: sticker.x, y: sticker.y,
         width: sticker.width, height: sticker.height })
+      return
+    }
+    const table = tables.find((item) => item.id === id)
+    if (table) {
+      selectedGroupItems.push({ id, kind: 'table', x: table.x, y: table.y,
+        width: tableWidth(table), height: tableHeight(table),
+        minScale: Math.max(...tableColumnWidths(table).map((width) => MIN_TABLE_CELL_WIDTH / width),
+          ...table.rowHeights.map((height) => MIN_TABLE_CELL_HEIGHT / height)) })
       return
     }
     const drawing = drawings.find((item) => item.id === id)
@@ -1726,6 +2127,7 @@ export default function BoardCanvas() {
           if (objectKind === 'text') selectText(objectId)
           else if (objectKind === 'sticker') selectSticker(objectId)
           else if (objectKind === 'drawing') selectDrawing(objectId)
+          else if (objectKind === 'table') selectTable(objectId)
           else selectArrow(objectId)
           setBoardContextMenu({ x: event.clientX, y: event.clientY, objectKind, objectId })
           return
@@ -1756,6 +2158,16 @@ export default function BoardCanvas() {
       <div ref={drawingCaptureRef} className={`board-drawing-capture${drawingStyle ? ' board-drawing-capture--active' : ''}`}
         aria-hidden="true" />
       {viewState && <div className="board-objects" style={{ width: BOARD_WIDTH, height: BOARD_HEIGHT, transform: `translate(${viewState.x}px, ${viewState.y}px) scale(${viewState.scale})` }}>
+        {tables.map((table) => <BoardTable key={table.id} item={table}
+          selected={selectedTableId === table.id || multiSelectedIds.includes(table.id)}
+          groupSelected={multiSelectedIds.includes(table.id)}
+          selectedCells={selectedTableId === table.id ? selectedTableCells : []}
+          interactive={navigationMode === 'cursor' && !multiSelectedIds.includes(table.id)}
+          scale={viewState.scale} layer={objectLayers.get(table.id) ?? 1}
+          onSelect={selectTable} onCellSelect={selectTableCell}
+          onRowSelect={(id, row) => selectTableLine(id, 'row', row)}
+          onColumnSelect={(id, column) => selectTableLine(id, 'column', column)} onChange={changeTable}
+          onRowHeight={changeTableRowHeight} />)}
         {drawings.map((drawing) => <Drawing key={drawing.id} item={drawing}
           selected={!drawingStyle && (selectedDrawingId === drawing.id || multiSelectedIds.includes(drawing.id))}
           groupSelected={multiSelectedIds.includes(drawing.id)}
@@ -1826,6 +2238,27 @@ export default function BoardCanvas() {
         onToggle={toggleObjectSelection} onTransformStart={captureGroupTransform}
         onMove={moveSelectedObjects} onScale={scaleSelectedObjects} />}
       {selectionRect && <div className="board-selection" style={selectionRect} aria-hidden="true" />}
+      {selectedTable && viewState && navigationMode === 'cursor' && <TableToolbar
+        key={`${selectedTable.id}:${activeTableCells.length ? 'cells' : 'table'}`}
+        cells={activeTableCells} selectedLine={selectedTableLine} fontSize={selectedTable.fontSize}
+        centerX={tableToolbarCenterX} top={tableToolbarTop}
+        onFontSize={(size) => changeTableFontSize(selectedTable.id, size)}
+        onChangeCells={changeSelectedTableCells}
+        onFormat={(format) => changeSelectedTableCells({ [format]: !activeTableCells.every((cell) => Boolean(cell[format])) })}
+        onMerge={mergeSelectedTableCells}
+        onSplit={splitSelectedTableCells}
+        onDeleteLine={deleteSelectedTableLine}
+        onCopy={() => {
+          if (selectedTableCells.length) {
+            const value = tableClipboardText(selectedTable, selectedTableCells)
+            if (navigator.clipboard) void navigator.clipboard.writeText(value).catch(() => {})
+          } else {
+            const payload = selectedObjectClipboard()
+            if (payload) writeObjectClipboard(payload)
+          }
+        }}
+        onLayer={(action) => changeObjectLayer([selectedTable.id], action)}
+        onDelete={() => deleteTable(selectedTable.id)} />}
       {selectedText && viewState && navigationMode === 'cursor' && <TextToolbar key={multiSelectedIds.length ? multiSelectedIds.join(':') : selectedText.id}
         item={selectedText} items={selectedTexts} centerX={toolbarCenterX} top={toolbarTop} activeFormatsOverride={groupFormats}
         onChange={(changes) => multiSelectedIds.length ? changeSelectedTexts(changes) : changeText(selectedText.id, changes)}
@@ -1855,7 +2288,7 @@ export default function BoardCanvas() {
             - (boardContextMenu.objectKind === 'arrow' ? 138 : boardContextMenu.objectKind ? 174 : 102), boardContextMenu.y)) }}
         onPointerDown={(event) => event.stopPropagation()} onContextMenu={(event) => event.preventDefault()}>
         {boardContextMenu.objectKind && boardContextMenu.objectId ? <>
-          {boardContextMenu.objectKind !== 'arrow' && <button type="button" role="menuitem" onClick={() => {
+          {boardContextMenu.objectKind !== 'arrow' && boardContextMenu.objectKind !== 'table' && <button type="button" role="menuitem" onClick={() => {
             const payload = selectedObjectClipboard()
             setBoardContextMenu(null)
             if (payload) writeObjectClipboard(payload)
@@ -1873,6 +2306,7 @@ export default function BoardCanvas() {
             setBoardContextMenu(null)
             if (objectKind === 'text') deleteSelectedTexts()
             else if (objectKind === 'sticker') deleteSticker(objectId!)
+            else if (objectKind === 'table') deleteTable(objectId!)
             else if (objectKind === 'drawing') {
               setDrawings((current) => current.filter((drawing) => drawing.id !== objectId))
               setSelectedDrawingId(null)
@@ -1895,6 +2329,7 @@ export default function BoardCanvas() {
         navigationModeRef.current = mode
         setNavigationMode(mode)
         if (mode === 'hand') {
+          setSelectedTableId(null)
           if (document.activeElement instanceof HTMLElement) document.activeElement.blur()
           clearTextSelection()
           setSelectedId(null)
@@ -1909,6 +2344,8 @@ export default function BoardCanvas() {
         stickerModeRef.current = sticker
         canvasRef.current?.classList.toggle('is-sticker-mode', Boolean(sticker))
         if (sticker) {
+          tableModeRef.current = null
+          setSelectedTableId(null)
           textModeRef.current = false
           canvasRef.current?.classList.remove('is-text-mode')
           clearTextSelection()
@@ -1923,6 +2360,8 @@ export default function BoardCanvas() {
         const editor = editingId ? editorRefs.current.get(editingId) : null
         if (editor && document.activeElement === editor) editor.blur()
         textModeRef.current = active
+        if (active) tableModeRef.current = null
+        if (active) setSelectedTableId(null)
         canvasRef.current?.classList.toggle('is-text-mode', active)
         clearTextSelection()
         setSelectedId(null)
@@ -1936,6 +2375,8 @@ export default function BoardCanvas() {
         setDrawingStyle(style)
         canvasRef.current?.classList.toggle('is-drawing-mode', Boolean(style))
         if (style) {
+          tableModeRef.current = null
+          setSelectedTableId(null)
           textModeRef.current = false
           stickerModeRef.current = null
           canvasRef.current?.classList.remove('is-text-mode', 'is-sticker-mode')
@@ -1947,6 +2388,23 @@ export default function BoardCanvas() {
           setMultiSelectedIds([])
           setEditingId(null)
           setFocusId(null)
+        }
+      }} onTableToolChange={(size) => {
+        tableModeRef.current = size
+        if (size) {
+          textModeRef.current = false
+          stickerModeRef.current = null
+          drawingModeRef.current = null
+          setDrawingStyle(null)
+          canvasRef.current?.classList.remove('is-text-mode', 'is-sticker-mode', 'is-drawing-mode')
+          setSelectedId(null)
+          setSelectedStickerId(null)
+          setSelectedDrawingId(null)
+          setSelectedArrowId(null)
+          setSelectedTableId(null)
+          setMultiSelectedIds([])
+          setEditingId(null)
+          setEditingStickerId(null)
         }
       }} />
       <ZoomControls

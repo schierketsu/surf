@@ -1,0 +1,165 @@
+.board-table {
+  position: absolute;
+  border: 1px solid #a9b3bf;
+  background: #fff;
+  box-shadow: 0 2px 6px rgb(0 0 0 / 12%);
+  pointer-events: auto;
+}
+
+.board-table--selected { outline: 1px solid #0057ff; outline-offset: -1px; }
+
+.board-table__grid { display: grid; width: 100%; height: 100%; }
+
+.board-table__cell {
+  display: block;
+  min-width: 0;
+  padding: 8px;
+  resize: none;
+  overflow: hidden;
+  border: 0;
+  border-right: 1px solid #a9b3bf;
+  border-bottom: 1px solid #a9b3bf;
+  border-radius: 0;
+  outline: 0;
+  background: transparent;
+  color: #272727;
+  font-family: 'Doska', Arial, sans-serif;
+  font-size: 16px;
+  line-height: 1.25;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.board-table__cell--selected, .board-table__cell:focus { box-shadow: inset 0 0 0 2px #a7b1be; }
+
+.board-table__edge-select {
+  position: absolute;
+  z-index: 2;
+  display: block;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+.board-table__edge-select--row {
+  left: -5px;
+  width: 12px;
+}
+.board-table__edge-select--column {
+  top: -5px;
+  height: 12px;
+}
+:root:has(.board--cursor) .board-table__edge-select--row {
+  cursor: url('../../assets/table-cursors/table_row_cursor.png') 26 16, default !important;
+}
+:root:has(.board--cursor) .board-table__edge-select--column {
+  cursor: url('../../assets/table-cursors/table_column_cursor.png') 16 26, default !important;
+}
+.board-table__edge-select:focus-visible { outline: 2px solid #a7b1be; outline-offset: -2px; }
+
+.board-table__boundary {
+  position: absolute;
+  z-index: 2;
+  display: block;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  touch-action: none;
+}
+.board-table__boundary--column {
+  width: 10px;
+  margin-left: -5px;
+}
+.board-table__boundary--row {
+  height: 10px;
+  margin-top: -5px;
+}
+:root:has(.board--cursor) .board-table__boundary--column {
+  cursor: url('../../assets/table-cursors/table_column_resize_cursor.png') 16 16, ew-resize !important;
+}
+:root:has(.board--cursor) .board-table__boundary--row {
+  cursor: url('../../assets/table-cursors/table_row_resize_cursor.png') 16 16, ns-resize !important;
+}
+.board-table__boundary:focus-visible { outline: 2px solid #a7b1be; outline-offset: -2px; }
+
+.board-table__move,
+.board-table__add {
+  position: absolute;
+  z-index: 4;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: 10px;
+  background: var(--control-background);
+  box-shadow: var(--control-shadow);
+  cursor: pointer;
+  transform: scale(var(--table-control-scale));
+  transition: background-color 140ms ease, box-shadow 140ms ease;
+}
+
+.board-table__move img,
+.board-table__add img {
+  display: block;
+  width: 16px;
+  height: 16px;
+  object-fit: contain;
+  pointer-events: none;
+}
+
+.board-table__move img { width: 18px; height: 18px; }
+.board-table__move { left: 0; top: -40px; transform-origin: left bottom; touch-action: none; }
+.board-table__add--row { left: calc(50% - 16px); bottom: -40px; transform-origin: center top; }
+.board-table__add--column { top: calc(50% - 16px); right: -40px; transform-origin: left center; }
+.board-table__move:hover, .board-table__add:not(:disabled):hover {
+  background: var(--control-hover);
+}
+.board-table__move:focus-visible, .board-table__add:focus-visible {
+  outline: 2px solid #a7b1be;
+  outline-offset: 2px;
+}
+.board-table__add:disabled { opacity: .4; cursor: default; box-shadow: none; }
+
+.board-table__resize {
+  position: absolute;
+  z-index: 3;
+  display: block;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  touch-action: none;
+  transform: scale(var(--handle-inverse-scale));
+}
+
+.board-table__resize:hover .board-handle-dot { transform: translate(-50%, -50%) scale(1.25); }
+.board-table__resize--top-left { top: -10px; left: -10px; cursor: nwse-resize; }
+.board-table__resize--top-right { top: -10px; right: -10px; cursor: nesw-resize; }
+.board-table__resize--bottom-left { bottom: -10px; left: -10px; cursor: nesw-resize; }
+.board-table__resize--bottom-right { bottom: -10px; right: -10px; cursor: nwse-resize; }
+:root:has(.board--cursor) .board-table__resize--top-left,
+:root:has(.board--cursor) .board-table__resize--bottom-right {
+  cursor: url('../../assets/table-cursors/table_diagonal_nwse_cursor.png') 16 16, nwse-resize !important;
+}
+:root:has(.board--cursor) .board-table__resize--top-right,
+:root:has(.board--cursor) .board-table__resize--bottom-left {
+  cursor: url('../../assets/table-cursors/table_diagonal_nesw_cursor.png') 16 16, nesw-resize !important;
+}
+.board-table__resize--top { top: -10px; left: calc(50% - 10px); cursor: ns-resize; }
+.board-table__resize--right { top: calc(50% - 10px); right: -10px; cursor: ew-resize; }
+.board-table__resize--bottom { bottom: -10px; left: calc(50% - 10px); cursor: ns-resize; }
+.board-table__resize--left { top: calc(50% - 10px); left: -10px; cursor: ew-resize; }
+:root:has(.board--cursor) .board-table__resize--top,
+:root:has(.board--cursor) .board-table__resize--bottom {
+  cursor: url('../../assets/table-cursors/table_row_resize_cursor.png') 16 16, ns-resize !important;
+}
+:root:has(.board--cursor) .board-table__resize--left,
+:root:has(.board--cursor) .board-table__resize--right {
+  cursor: url('../../assets/table-cursors/table_column_resize_cursor.png') 16 16, ew-resize !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .board-table__move, .board-table__add { transition: none; }
+}

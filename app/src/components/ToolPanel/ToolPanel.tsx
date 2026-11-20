@@ -1,18 +1,20 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import cursorIcon from './icons/cursor.png'
-import handIcon from './icons/hand.png'
-import stickerIcon from './icons/sticker.svg'
+import handIcon from '../../../../assets/hand.svg'
+import stickerIcon from '../../../../assets/sticker2.svg'
 import penIcon from '../../../../assets/pen.png'
+import tableIcon from '../../../../assets/table.png'
 import { TEXT_COLORS } from '../TextToolbar/TextToolbar'
 import './ToolPanel.css'
 
 export type NavigationMode = 'cursor' | 'hand'
 export type StickerStyle = { name: string; fill: string; border: string }
 export type DrawingStyle = { color: string; width: number; preset: number }
+export type TableSize = { rows: number; columns: number }
 export const STICKER_DRAG_TYPE = 'application/x-doska-sticker+json'
-type ActiveTool = 'drawing' | 'text' | 'sticker' | null
-type OpenMenu = 'drawing' | 'stickers' | null
-type IconName = 'pencil' | 'text' | 'sticker'
+type ActiveTool = 'drawing' | 'text' | 'sticker' | 'table' | null
+type OpenMenu = 'drawing' | 'stickers' | 'table' | null
+type IconName = 'pencil' | 'text' | 'sticker' | 'table'
 
 const INITIAL_DRAWING_PRESETS: DrawingStyle[] = [
   { color: '#272727', width: 2, preset: 0 },
@@ -36,6 +38,9 @@ export const STICKER_COLORS = [
 ] as const
 
 function Icon({ name }: { name: IconName }) {
+  if (name === 'table') {
+    return <img className="tool-panel__table-icon" src={tableIcon} alt="" aria-hidden="true" />
+  }
   if (name === 'sticker') {
     return <img className="tool-panel__sticker-icon" src={stickerIcon} alt="" aria-hidden="true" />
   }
@@ -49,12 +54,13 @@ type ToolPanelProps = {
   onTextToolChange: (active: boolean) => void
   onStickerToolChange: (sticker: StickerStyle | null) => void
   onDrawingToolChange: (style: DrawingStyle | null) => void
+  onTableToolChange: (size: TableSize | null) => void
   onNavigationModeChange: (mode: NavigationMode) => void
   resetToCursorToken: number
   boardScale: number
 }
 
-export default function ToolPanel({ onTextToolChange, onStickerToolChange, onDrawingToolChange,
+export default function ToolPanel({ onTextToolChange, onStickerToolChange, onDrawingToolChange, onTableToolChange,
   onNavigationModeChange, resetToCursorToken, boardScale }: ToolPanelProps) {
   const rootRef = useRef<HTMLDivElement>(null)
   const dragPreviewRef = useRef<HTMLDivElement | null>(null)
@@ -64,6 +70,7 @@ export default function ToolPanel({ onTextToolChange, onStickerToolChange, onDra
   const [editingDrawingPreset, setEditingDrawingPreset] = useState<number | null>(null)
   const [activeTool, setActiveTool] = useState<ActiveTool>(null)
   const [openMenu, setOpenMenu] = useState<OpenMenu>(null)
+  const [tablePreview, setTablePreview] = useState<TableSize>({ rows: 1, columns: 1 })
 
   useEffect(() => {
     if (!resetToCursorToken) return
@@ -117,6 +124,7 @@ export default function ToolPanel({ onTextToolChange, onStickerToolChange, onDra
           onTextToolChange(false)
           onStickerToolChange(null)
           onDrawingToolChange(null)
+          onTableToolChange(null)
         }}
       >
         <span className="tool-panel__navigation-slot">
@@ -143,6 +151,7 @@ export default function ToolPanel({ onTextToolChange, onStickerToolChange, onDra
             onTextToolChange(false)
             onStickerToolChange(null)
             onDrawingToolChange(drawingPresets[activeDrawingPreset])
+            onTableToolChange(null)
           }}
         >
           <Icon name="pencil" />
@@ -161,6 +170,7 @@ export default function ToolPanel({ onTextToolChange, onStickerToolChange, onDra
             onTextToolChange(true)
             onStickerToolChange(null)
             onDrawingToolChange(null)
+            onTableToolChange(null)
           }}
         >
           <Icon name="text" />
@@ -179,10 +189,21 @@ export default function ToolPanel({ onTextToolChange, onStickerToolChange, onDra
             onTextToolChange(false)
             onStickerToolChange(null)
             onDrawingToolChange(null)
+            onTableToolChange(null)
           }}
         >
           <Icon name="sticker" />
         </button>
+        <button className="tool-panel__button" type="button" aria-label="Таблица" title="Таблица"
+          aria-expanded={openMenu === 'table'} aria-controls="table-sizes"
+          data-active={activeTool === 'table'} onClick={() => {
+            setActiveTool('table')
+            setOpenMenu(openMenu === 'table' ? null : 'table')
+            onTextToolChange(false)
+            onStickerToolChange(null)
+            onDrawingToolChange(null)
+            onTableToolChange(null)
+          }}><Icon name="table" /></button>
       </div>
 
       {openMenu === 'drawing' && (
@@ -206,6 +227,7 @@ export default function ToolPanel({ onTextToolChange, onStickerToolChange, onDra
               onTextToolChange(false)
               onStickerToolChange(null)
               onDrawingToolChange(preset)
+              onTableToolChange(null)
             }}>
             <span style={{ width: Math.max(4, Math.min(18, preset.width)), height: Math.max(4, Math.min(18, preset.width)),
               backgroundColor: preset.color }} />
@@ -265,6 +287,7 @@ export default function ToolPanel({ onTextToolChange, onStickerToolChange, onDra
                 onTextToolChange(false)
                 onStickerToolChange(sticker)
                 onDrawingToolChange(null)
+                onTableToolChange(null)
               }}
               onDragStart={(event) => {
                 event.dataTransfer.effectAllowed = 'copy'
@@ -300,11 +323,37 @@ export default function ToolPanel({ onTextToolChange, onStickerToolChange, onDra
                 setOpenMenu(null)
                 onStickerToolChange(null)
                 onDrawingToolChange(null)
+                onTableToolChange(null)
               }}
             />
           ))}
         </div>
       )}
+      {openMenu === 'table' && <div id="table-sizes" className="tool-panel__popover tool-panel__popover--table"
+        role="group" aria-label="Размер таблицы">
+        <div className="tool-panel__table-grid" onPointerLeave={() => setTablePreview({ rows: 1, columns: 1 })}>
+          {Array.from({ length: 25 }, (_, index) => {
+            const rows = Math.floor(index / 5) + 1
+            const columns = index % 5 + 1
+            return <button key={index} type="button" className="tool-panel__table-cell"
+              aria-label={`Создать таблицу ${columns} на ${rows}`}
+              data-highlighted={rows <= tablePreview.rows && columns <= tablePreview.columns}
+              onPointerEnter={() => setTablePreview({ rows, columns })}
+              onFocus={() => setTablePreview({ rows, columns })}
+              onClick={() => {
+                setNavigationMode('cursor')
+                onNavigationModeChange('cursor')
+                setActiveTool('table')
+                setOpenMenu(null)
+                onTextToolChange(false)
+                onStickerToolChange(null)
+                onDrawingToolChange(null)
+                onTableToolChange({ rows, columns })
+              }} />
+          })}
+        </div>
+        <span className="tool-panel__table-size">{tablePreview.columns} × {tablePreview.rows}</span>
+      </div>}
     </div>
   )
 }

@@ -447,13 +447,17 @@ export function arrowGeometry(tail: Anchor, head: Anchor, bend: Point, texts: Co
         const clearLeg = (a: Point, b: Point, attachedId?: string) => !texts.some((item, index) =>
           item.id !== attachedId && crosses(a, b, boxes[index]))
         if (!clearLeg(start, from, tail.textId) || !clearLeg(to, end, head.textId)) continue
-        const route = centeredOrthogonalRoute(from, to, boxes, horizontalFirst, horizontalLast, arrival)
-          ?? orthogonalRoute(from, to, boxes, arrival)
-        if (!route) continue
-        const points = [start, ...route, end]
-          .filter((point, index, all) => index === 0 || point.x !== all[index - 1].x || point.y !== all[index - 1].y)
-        return { start, tip, end, path: `M ${points.map((point) => `${point.x} ${point.y}`).join(' L ')}`,
-          handle: routeMiddle(points) }
+        for (let attempt = 0; attempt < 2; attempt++) {
+          const route = attempt === 0
+            ? centeredOrthogonalRoute(from, to, boxes, horizontalFirst, horizontalLast, arrival)
+            : orthogonalRoute(from, to, boxes, arrival)
+          if (!route) continue
+          const points = [start, ...route, end]
+            .filter((point, index, all) => index === 0 || point.x !== all[index - 1].x || point.y !== all[index - 1].y)
+          if (routeBacktracks(points)) continue
+          return { start, tip, end, path: `M ${points.map((point) => `${point.x} ${point.y}`).join(' L ')}`,
+            handle: routeMiddle(points) }
+        }
       }
     }
     const arrival = head.side ? sideDirection(head.side, { x: 0, y: 0 }) : null

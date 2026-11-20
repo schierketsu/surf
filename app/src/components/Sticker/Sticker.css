@@ -53,3 +53,13 @@
   cursor: move;
   touch-action: none;
 }
+
+:root:has(.board--cursor) .board-sticker .text-box__drag-area--top,
+:root:has(.board--cursor) .board-sticker .text-box__drag-area--bottom {
+  cursor: url('../../assets/table-cursors/table_row_resize_cursor.png') 16 16, ns-resize !important;
+}
+
+:root:has(.board--cursor) .board-sticker .text-box__drag-area--left,
+:root:has(.board--cursor) .board-sticker .text-box__drag-area--right {
+  cursor: url('../../assets/table-cursors/table_column_resize_cursor.png') 16 16, ew-resize !important;
+}

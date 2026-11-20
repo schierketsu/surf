@@ -102,8 +102,8 @@ h6 {
   cursor: grabbing;
 }
 
-.board-canvas.is-text-mode {
-  cursor: text;
+:root:has(.board--cursor) .board-canvas.is-text-mode {
+  cursor: url('../../assets/text_cursor.svg') 4 4, text !important;
 }
 
 .board-canvas.is-sticker-mode {

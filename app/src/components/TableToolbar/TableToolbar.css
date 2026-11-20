@@ -1,0 +1,13 @@
+.table-toolbar__color-button { width: 34px; }
+.table-toolbar__color-button > span {
+  display: block;
+  width: 20px;
+  height: 20px;
+  border: 1px solid rgb(39 39 39 / 18%);
+  border-radius: 50%;
+}
+.table-toolbar__colors { right: -45px; }
+.table-toolbar__white { background: #fff !important; border: 1px solid #cfd5dc !important; }
+.table-toolbar__merge:disabled { opacity: .35; cursor: default; }
+.text-toolbar__control > .table-toolbar__merge:disabled:hover { background: transparent; }
+

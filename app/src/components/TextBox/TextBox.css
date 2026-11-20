@@ -88,10 +88,36 @@
 .text-box__handle--bottom-left { cursor: nesw-resize; }
 .text-box__handle--bottom-right { right: 0; bottom: 0; cursor: nwse-resize; transform-origin: bottom right; }
 
+:root:has(.board--cursor) .text-box__handle--top-left,
+:root:has(.board--cursor) .text-box__handle--bottom-right {
+  cursor: url('../../assets/table-cursors/table_diagonal_nwse_cursor.png') 16 16, nwse-resize !important;
+}
+
+:root:has(.board--cursor) .text-box__handle--top-right,
+:root:has(.board--cursor) .text-box__handle--bottom-left {
+  cursor: url('../../assets/table-cursors/table_diagonal_nesw_cursor.png') 16 16, nesw-resize !important;
+}
+
 .text-box__handle--top-left .board-handle-dot { top: 0; left: 0; }
 .text-box__handle--top-right .board-handle-dot { top: 0; left: 100%; }
 .text-box__handle--bottom-left .board-handle-dot { top: 100%; left: 0; }
 .text-box__handle--bottom-right .board-handle-dot { top: 100%; left: 100%; }
+
+.text-box > .text-box__handle {
+  width: 14px;
+  height: 14px;
+  min-width: 14px;
+  min-height: 14px;
+  max-width: 14px;
+  max-height: 14px;
+  transform-origin: center;
+}
+
+.text-box > .text-box__handle--top-left { top: -7px; left: -7px; }
+.text-box > .text-box__handle--top-right { top: -7px; right: -7px; }
+.text-box > .text-box__handle--bottom-left { bottom: -7px; left: -7px; }
+.text-box > .text-box__handle--bottom-right { bottom: -7px; right: -7px; }
+.text-box > .text-box__handle .board-handle-dot { top: 50%; left: 50%; }
 
 .text-box__drag-area {
   position: absolute;
@@ -136,6 +162,16 @@
 .text-box__drag-area--right { top: 10px; right: -6px; bottom: 10px; width: 12px; cursor: ew-resize; }
 .text-box__drag-area--bottom { right: 10px; bottom: -6px; left: 10px; height: 12px; cursor: ns-resize; }
 .text-box__drag-area--left { top: 10px; bottom: 10px; left: -6px; width: 12px; cursor: ew-resize; }
+
+:root:has(.board--cursor) .text-box > .text-box__drag-area--top,
+:root:has(.board--cursor) .text-box > .text-box__drag-area--bottom {
+  cursor: url('../../assets/table-cursors/table_row_resize_cursor.png') 16 16, ns-resize !important;
+}
+
+:root:has(.board--cursor) .text-box > .text-box__drag-area--left,
+:root:has(.board--cursor) .text-box > .text-box__drag-area--right {
+  cursor: url('../../assets/table-cursors/table_column_resize_cursor.png') 16 16, ew-resize !important;
+}
 
 .text-box__comment {
   position: absolute;
