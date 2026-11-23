@@ -16,6 +16,8 @@ import StickerToolbar from './components/StickerToolbar/StickerToolbar'
 import Drawing, { drawingPath, type DrawingItem } from './components/Drawing/Drawing'
 import DrawingToolbar from './components/DrawingToolbar/DrawingToolbar'
 import type { LayerAction } from './components/LayerMenuItems'
+import { loadBoard, saveBoard, type SavedBoard } from './boardStorage'
+import { renderBoardPreview } from './boardPreview'
 
 type View = { scale: number; x: number; y: number }
 type SelectionRect = { left: number; top: number; width: number; height: number }
@@ -351,7 +353,10 @@ function moveArrowBend(arrow: Arrow, point: Point, index = 1, texts: Connectable
     bendOffset: bendOffsetFor(arrow.tail, arrow.head, point, texts), bendEdited: true }
 }
 
-export default function BoardCanvas() {
+export default function BoardCanvas({ boardId, saveRef }: {
+  boardId: string
+  saveRef: { current: (() => Promise<string>) | null }
+}) {
   const boardRef = useRef<HTMLElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const drawingCaptureRef = useRef<HTMLDivElement>(null)
@@ -417,6 +422,42 @@ export default function BoardCanvas() {
   const [arrowDrag, setArrowDrag] = useState<ArrowDrag | null>(null)
   const [arrowPointer, setArrowPointer] = useState<Point | null>(null)
   const [snapAnchor, setSnapAnchor] = useState<Anchor | null>(null)
+  const [loaded, setLoaded] = useState(false)
+  const persistenceReadyRef = useRef(false)
+
+  useEffect(() => {
+    let cancelled = false
+    loadBoard(boardId).then((saved) => {
+      if (cancelled || !saved) return
+      setTexts(saved.texts)
+      setStickers(saved.stickers)
+      setTables(saved.tables)
+      setDrawings(saved.drawings)
+      setArrows(saved.arrows)
+      setLayerOrder(saved.layerOrder)
+    }).catch((error) => console.error('Не удалось загрузить доску', error))
+      .finally(() => { if (!cancelled) setLoaded(true) })
+    return () => { cancelled = true }
+  }, [boardId])
+
+  const saveNow = async () => {
+    if (!loaded) return ''
+    const content: Omit<SavedBoard, 'preview'> = {
+      id: boardId, version: 1, texts, stickers, tables, drawings, arrows, layerOrder,
+    }
+    const preview = renderBoardPreview(content)
+    await saveBoard({ ...content, preview })
+    return preview
+  }
+  saveRef.current = saveNow
+
+  useEffect(() => {
+    if (!loaded) return
+    if (!persistenceReadyRef.current) { persistenceReadyRef.current = true; return }
+    const timer = window.setTimeout(() => { void saveNow().catch((error) =>
+      console.error('Не удалось сохранить доску', error)) }, 700)
+    return () => window.clearTimeout(timer)
+  }, [loaded, texts, stickers, tables, drawings, arrows, layerOrder])
 
   const allObjectIds = useMemo(() => [
     ...drawings.map((item) => item.id),

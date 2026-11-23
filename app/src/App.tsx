@@ -1,5 +1,7 @@
-import { useEffect, useState, type MouseEvent } from 'react'
+import { useEffect, useRef, useState, type MouseEvent } from 'react'
 import BoardCanvas from './BoardCanvas'
+import { loadBoard } from './boardStorage'
+import { renderBoardPreview } from './boardPreview'
 import TemplateControl from './components/TemplateControl/TemplateControl'
 import './HomeScreen.css'
 
@@ -19,6 +21,20 @@ function currentPage() {
 export default function App() {
   const [page, setPage] = useState(currentPage)
   const [dashboardPage, setDashboardPage] = useState(1)
+  const [previews, setPreviews] = useState<Record<string, string>>({})
+  const saveBoardRef = useRef<(() => Promise<string>) | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    Promise.all(boards.map(async (board) => {
+      try {
+        const saved = await loadBoard(board.id)
+        return [board.id, saved ? renderBoardPreview(saved) : ''] as const
+      }
+      catch { return [board.id, ''] as const }
+    })).then((entries) => { if (!cancelled) setPreviews(Object.fromEntries(entries)) })
+    return () => { cancelled = true }
+  }, [])
 
   useEffect(() => {
     const onPopState = () => setPage(currentPage())
@@ -33,7 +49,11 @@ export default function App() {
     setPage(id)
   }
 
-  const returnToDashboard = () => {
+  const returnToDashboard = async () => {
+    try {
+      const preview = await saveBoardRef.current?.()
+      if (preview !== undefined) setPreviews((current) => ({ ...current, [page]: preview }))
+    } catch (error) { console.error('Не удалось сохранить доску', error) }
     window.history.pushState(null, '', '/')
     setPage('home')
   }
@@ -45,18 +65,34 @@ export default function App() {
 
   if (page === 'home') return <main className="home-screen">
     <section className="home-screen__content" aria-labelledby="home-title">
-      <h1 id="home-title" className="home-screen__title">Доска</h1>
+      <div className="home-screen__header">
+        <h1 id="home-title" className="home-screen__title">Доска</h1>
+        <button className="home-screen__create" type="button" disabled>Создать</button>
+      </div>
       <input className="home-screen__search" type="text" aria-label="Поиск досок" placeholder="Поиск досок" />
       <div className="home-screen__filters" aria-label="Фильтры досок">
-        {['Все', 'Избранное'].map((filter) =>
-          <span className="home-screen__filter" key={filter}>{filter}</span>)}
+        <div className="home-screen__filter-group">
+          {['Все', 'Избранное'].map((filter) =>
+            <span className="home-screen__filter" key={filter}>{filter}</span>)}
+        </div>
+        <div className="home-screen__filter-group">
+          <button className="home-screen__filter home-screen__filter--disabled" type="button" disabled>Дата</button>
+          <button className="home-screen__filter home-screen__filter--disabled" type="button" disabled>
+            Сортировать<span className="home-screen__sort-arrow" aria-hidden="true" />
+          </button>
+        </div>
       </div>
       <div className="home-screen__grid">
         {dashboardPage === 1 && boards.map((board) => <div className="home-screen__item" key={board.id}>
           <a className={`home-screen__thumbnail home-screen__thumbnail--active${board.id === 'id2' ? ' home-screen__thumbnail--gray' : ''}`}
             href={boardPath(board.id)} onClick={(event) => openBoard(event, board.id)}
-            aria-label={`Открыть доску ${board.name}`} />
-          <span className="home-screen__name">{board.name}</span>
+            aria-label={`Открыть доску ${board.name}`}>
+            {previews[board.id] && <img className="home-screen__preview" src={previews[board.id]} alt="" />}
+          </a>
+          <span className="home-screen__name">{board.name}
+            <span className="home-screen__board-id">#{board.id.toUpperCase()}</span>
+          </span>
+          <span className="home-screen__created">Дата создания: Пусто</span>
         </div>)}
         {Array.from({ length: CARDS_PER_PAGE - (dashboardPage === 1 ? boards.length : 0) }, (_, index) =>
           <div className="home-screen__item" key={`${dashboardPage}-${index}`}>
@@ -76,7 +112,7 @@ export default function App() {
 
   return (
     <div className="app-shell">
-      <BoardCanvas key={page} />
+      <BoardCanvas key={page} boardId={page} saveRef={saveBoardRef} />
       <TemplateControl name={boards.find((board) => board.id === page)?.name ?? ''} onReturn={returnToDashboard} />
     </div>
   )

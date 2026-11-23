@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import menuIcon from './icons/menu.png'
+import menuIcon from './icons/3rows.svg'
 import './TemplateControl.css'
 
 export default function TemplateControl({ name, onReturn }: { name: string; onReturn: () => void }) {

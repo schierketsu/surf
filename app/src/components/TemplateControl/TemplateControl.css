@@ -7,7 +7,7 @@
   align-items: center;
   gap: 8px;
   height: 44px;
-  padding: 4px 20px 4px 9px;
+  padding: 4px 20px 4px 4px;
   border-radius: var(--control-radius);
   background: var(--control-background);
   box-shadow: var(--control-shadow);
@@ -37,8 +37,8 @@
 
 .template-control__more img {
   display: block;
-  width: 18px;
-  height: 18px;
+  width: 24px;
+  height: 24px;
   object-fit: contain;
   pointer-events: none;
 }
@@ -76,5 +76,5 @@
 }
 
 .template-control__menu-item:hover:not(:disabled) { background: var(--control-hover); }
-.template-control__menu-item:disabled { cursor: default; }
+.template-control__menu-item:disabled { color: #9b9b9b; cursor: default; }
 .template-control__menu-item:focus-visible { outline: 2px solid #0057ff; }
