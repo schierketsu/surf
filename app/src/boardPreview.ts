@@ -3,6 +3,7 @@ import type { SavedBoard } from './boardStorage'
 import { drawingPath } from './components/Drawing/Drawing'
 import { tableColumnWidths } from './components/BoardTable/BoardTable'
 import { BOARD_HEIGHT, BOARD_WIDTH } from './gridHierarchy'
+import { boardObjectIds, normalizeLayerOrder } from './boardLayers'
 
 const PREVIEW_WIDTH = 640
 const PREVIEW_HEIGHT = 360
@@ -78,9 +79,6 @@ export function renderBoardPreview(board: BoardContent) {
       context.lineWidth = 1
       context.strokeRect(item.x, item.y, item.width, item.height)
     }
-    const text = plainText(item.html)
-    drawText(context, text, item.x + 16, item.y + 16, item.width - 32, item.height - 32,
-      item.fontSize, '#272727', item.align, item.bold, item.italic)
   })
   for (const item of board.tables) objects.set(item.id, () => {
     const widths = tableColumnWidths(item)
@@ -140,7 +138,6 @@ export function renderBoardPreview(board: BoardContent) {
     }
     context.restore()
   })
-  for (const id of board.layerOrder) { objects.get(id)?.(); objects.delete(id) }
-  for (const draw of objects.values()) draw()
+  for (const id of normalizeLayerOrder(board.layerOrder, boardObjectIds(board))) objects.get(id)?.()
   return canvas.toDataURL('image/webp', .8)
 }

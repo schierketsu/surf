@@ -18,6 +18,7 @@ import DrawingToolbar from './components/DrawingToolbar/DrawingToolbar'
 import type { LayerAction } from './components/LayerMenuItems'
 import { loadBoard, saveBoard, type SavedBoard } from './boardStorage'
 import { renderBoardPreview } from './boardPreview'
+import { boardObjectIds, normalizeLayerOrder } from './boardLayers'
 
 type View = { scale: number; x: number; y: number }
 type SelectionRect = { left: number; top: number; width: number; height: number }
@@ -189,14 +190,6 @@ function removeTableLine(table: TableItem, { axis, index }: TableLineSelection):
       : table.rowMinHeights ? [...table.rowMinHeights] : undefined,
     columnWidths: axis === 'column' ? tableColumnWidths(table).filter((_, column) => column !== index)
       : [...tableColumnWidths(table)] }
-}
-
-function normalizeLayerOrder(order: string[], objectIds: string[]) {
-  const existing = new Set(objectIds)
-  const normalized = order.filter((id) => existing.has(id))
-  const known = new Set(normalized)
-  objectIds.forEach((id) => { if (!known.has(id)) normalized.push(id) })
-  return normalized
 }
 
 function reorderLayers(order: string[], selectedIds: string[], action: LayerAction) {
@@ -459,13 +452,8 @@ export default function BoardCanvas({ boardId, saveRef }: {
     return () => window.clearTimeout(timer)
   }, [loaded, texts, stickers, tables, drawings, arrows, layerOrder])
 
-  const allObjectIds = useMemo(() => [
-    ...drawings.map((item) => item.id),
-    ...stickers.map((item) => item.id),
-    ...tables.map((item) => item.id),
-    ...texts.map((item) => item.id),
-    ...arrows.map((item) => item.id),
-  ], [drawings, stickers, tables, texts, arrows])
+  const allObjectIds = useMemo(() => boardObjectIds({ drawings, stickers, tables, texts, arrows }),
+    [drawings, stickers, tables, texts, arrows])
   const orderedObjectIds = useMemo(() => normalizeLayerOrder(layerOrder, allObjectIds), [layerOrder, allObjectIds])
   const objectLayers = useMemo(() => new Map(orderedObjectIds.map((id, index) => [id, index + 1])), [orderedObjectIds])
   const selectedLayerIds = useMemo(() => selectedTableId ? [selectedTableId]

@@ -54,6 +54,13 @@
   touch-action: none;
 }
 
+.board-sticker > .text-box__handle { transform-origin: center; }
+.board-sticker > .text-box__handle--top-left { top: -10px; left: -10px; }
+.board-sticker > .text-box__handle--top-right { top: -10px; right: -10px; }
+.board-sticker > .text-box__handle--bottom-left { bottom: -10px; left: -10px; }
+.board-sticker > .text-box__handle--bottom-right { right: -10px; bottom: -10px; }
+.board-sticker > .text-box__handle .board-handle-dot { top: 50%; left: 50%; }
+
 :root:has(.board--cursor) .board-sticker .text-box__drag-area--top,
 :root:has(.board--cursor) .board-sticker .text-box__drag-area--bottom {
   cursor: url('../../assets/table-cursors/table_row_resize_cursor.png') 16 16, ns-resize !important;
