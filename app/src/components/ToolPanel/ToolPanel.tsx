@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react'
+import { createPortal } from 'react-dom'
 import cursorIcon from './icons/cursor.png'
 import handIcon from '../../../../assets/hand.svg'
-import stickerIcon from '../../../../assets/sticker2.svg'
+import stickerIcon from './icons/sticker-outline.svg'
 import penIcon from '../../../../assets/pen.png'
 import tableIcon from '../../../../assets/table.png'
 import { TEXT_COLORS } from '../TextToolbar/TextToolbar'
@@ -12,6 +13,7 @@ export type StickerStyle = { name: string; fill: string; border: string }
 export type DrawingStyle = { color: string; width: number; preset: number }
 export type TableSize = { rows: number; columns: number }
 export const STICKER_DRAG_TYPE = 'application/x-doska-sticker+json'
+const MAX_PDF_SIZE = 10 * 1024 * 1024
 type ActiveTool = 'drawing' | 'text' | 'sticker' | 'table' | null
 type OpenMenu = 'drawing' | 'stickers' | 'table' | null
 type IconName = 'pencil' | 'text' | 'sticker' | 'table'
@@ -55,14 +57,16 @@ type ToolPanelProps = {
   onStickerToolChange: (sticker: StickerStyle | null) => void
   onDrawingToolChange: (style: DrawingStyle | null) => void
   onTableToolChange: (size: TableSize | null) => void
+  onPdfFile: (file: File) => Promise<void>
   onNavigationModeChange: (mode: NavigationMode) => void
   resetToCursorToken: number
   boardScale: number
 }
 
-export default function ToolPanel({ onTextToolChange, onStickerToolChange, onDrawingToolChange, onTableToolChange,
+export default function ToolPanel({ onTextToolChange, onStickerToolChange, onDrawingToolChange, onTableToolChange, onPdfFile,
   onNavigationModeChange, resetToCursorToken, boardScale }: ToolPanelProps) {
   const rootRef = useRef<HTMLDivElement>(null)
+  const pdfInputRef = useRef<HTMLInputElement>(null)
   const dragPreviewRef = useRef<HTMLDivElement | null>(null)
   const [navigationMode, setNavigationMode] = useState<NavigationMode>('cursor')
   const [drawingPresets, setDrawingPresets] = useState(INITIAL_DRAWING_PRESETS)
@@ -71,6 +75,14 @@ export default function ToolPanel({ onTextToolChange, onStickerToolChange, onDra
   const [activeTool, setActiveTool] = useState<ActiveTool>(null)
   const [openMenu, setOpenMenu] = useState<OpenMenu>(null)
   const [tablePreview, setTablePreview] = useState<TableSize>({ rows: 1, columns: 1 })
+  const [pdfImporting, setPdfImporting] = useState(false)
+  const [pdfError, setPdfError] = useState<{ message: string } | null>(null)
+
+  useEffect(() => {
+    if (!pdfError) return
+    const timer = window.setTimeout(() => setPdfError(null), 5000)
+    return () => window.clearTimeout(timer)
+  }, [pdfError])
 
   useEffect(() => {
     if (!resetToCursorToken) return
@@ -204,7 +216,42 @@ export default function ToolPanel({ onTextToolChange, onStickerToolChange, onDra
             onDrawingToolChange(null)
             onTableToolChange(null)
           }}><Icon name="table" /></button>
+        <button className="tool-panel__button" type="button" aria-label="Добавить PDF" title="Добавить PDF"
+          disabled={pdfImporting} aria-busy={pdfImporting} onClick={() => pdfInputRef.current?.click()}>
+          <svg className="tool-panel__pdf-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2"
+              d="M18 9V4a1 1 0 0 0-1-1H8.914a1 1 0 0 0-.707.293L4.293 7.207A1 1 0 0 0 4 7.914V20a1 1 0 0 0 1 1h4M9 3v4a1 1 0 0 1-1 1H4m11 6v4m-2-2h4m3 0a5 5 0 1 1-10 0 5 5 0 0 1 10 0Z" />
+          </svg>
+        </button>
+        <input ref={pdfInputRef} className="tool-panel__file-input" type="file" accept=".pdf,application/pdf"
+          aria-label="Выбрать PDF" onChange={(event) => {
+            const file = event.currentTarget.files?.[0]
+            event.currentTarget.value = ''
+            if (!file) return
+            setPdfError(null)
+            if (file.size > MAX_PDF_SIZE) {
+              setPdfError({ message: 'PDF больше 10 МБ. Выберите файл меньшего размера.' })
+              return
+            }
+            setPdfImporting(true)
+            setNavigationMode('cursor')
+            onNavigationModeChange('cursor')
+            setActiveTool(null)
+            setOpenMenu(null)
+            onTextToolChange(false)
+            onStickerToolChange(null)
+            onDrawingToolChange(null)
+            onTableToolChange(null)
+            void onPdfFile(file).catch((error) => {
+              console.error('Не удалось добавить PDF', error)
+              setPdfError({ message: 'Не удалось открыть PDF. Проверьте файл и повторите попытку.' })
+            }).finally(() => setPdfImporting(false))
+          }} />
       </div>
+      {pdfImporting && createPortal(
+        <div className="tool-panel__pdf-status" role="status">Добавляю страницы PDF…</div>, document.body)}
+      {pdfError && createPortal(
+        <div className="tool-panel__pdf-error" role="alert">{pdfError.message}</div>, document.body)}
 
       {openMenu === 'drawing' && (
         <div id="drawing-tools" className="tool-panel__popover tool-panel__popover--drawing" role="group" aria-label="Вид инструмента рисования">

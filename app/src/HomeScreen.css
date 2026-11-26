@@ -35,10 +35,8 @@
   cursor: pointer;
 }
 
-.home-screen__all-boards[aria-current="page"],
-.home-screen__folder-item[aria-current="page"] { background: var(--canvas-background); }
-.home-screen__all-boards:hover:not([aria-current="page"]),
-.home-screen__folder-item:hover:not([aria-current="page"]) { background: var(--control-hover); }
+.home-screen__all-boards[aria-current="page"] { background: var(--canvas-background); }
+.home-screen__all-boards:hover:not([aria-current="page"]) { background: var(--control-hover); }
 
 .home-screen__folders-row {
   display: flex;
@@ -70,10 +68,11 @@
   width: 28px;
   height: 28px;
   margin-left: auto;
+  margin-right: 6px;
   padding: 0;
   border: 0;
   border-radius: 6px;
-  background: var(--control-hover);
+  background: transparent;
   color: var(--text);
   cursor: pointer;
 }
@@ -91,10 +90,11 @@
 
 .home-screen__folder-draft {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 28px 28px;
+  grid-template-columns: minmax(0, 1fr) 28px;
   align-items: center;
   gap: 4px;
   padding-left: 12px;
+  padding-right: 6px;
 }
 
 .home-screen__folder-draft input {
@@ -108,40 +108,6 @@
 }
 
 .home-screen__folder-draft input::selection { background: #0057ff; color: #fff; }
-
-.home-screen__folder-color-control { position: relative; }
-
-.home-screen__folder-color-toggle {
-  display: grid;
-  place-items: center;
-  width: 28px;
-  height: 28px;
-  padding: 0;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  cursor: pointer;
-}
-
-.home-screen__folder-color-toggle:hover { background: var(--control-hover); }
-.home-screen__folder-color-toggle:focus-visible { outline: 2px solid #596573; outline-offset: 2px; }
-.home-screen__folder-color-toggle > span { width: 20px; height: 20px; border: 1px solid #d9dce1; border-radius: 50%; }
-
-.home-screen__folder-color-menu {
-  position: absolute;
-  z-index: 6;
-  right: -36px;
-  top: calc(100% + 9px);
-  display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 8px;
-  width: calc(var(--sidebar-width) - 24px);
-  padding: 11px;
-  border: 1px solid #e7e9ed;
-  border-radius: 12px;
-  background: #fff;
-  box-shadow: 0 4px 18px rgb(0 0 0 / 14%);
-}
 
 .home-screen__folder-color {
   width: 100%;
@@ -173,7 +139,7 @@
 
 .home-screen__folder-item {
   width: 100%;
-  padding: 8px 12px;
+  padding: 8px 44px 8px 12px;
   overflow: hidden;
   border: 0;
   border-radius: 8px;
@@ -185,12 +151,61 @@
   cursor: pointer;
 }
 
+.home-screen__folder-row { position: relative; }
+.home-screen__folder-row:has(> .home-screen__folder-item:hover) > .home-screen__folder-item,
+.home-screen__folder-row:has(> .home-screen__folder-menu-button:hover) > .home-screen__folder-item {
+  background: var(--control-hover);
+}
+.home-screen__folder-row--menu-open { z-index: 5; }
+.home-screen__card-menu-button.home-screen__folder-menu-button {
+  top: 2px; right: 4px; width: 32px; height: 32px; border-radius: 8px; background: transparent;
+}
+.home-screen__folder-row:hover .home-screen__folder-menu-button,
+.home-screen__folder-row:focus-within .home-screen__folder-menu-button,
+.home-screen__folder-row--menu-open .home-screen__folder-menu-button { opacity: 1; pointer-events: auto; }
+
+.home-screen__folder-action-menu {
+  position: absolute;
+  z-index: 6;
+  top: calc(100% + 4px);
+  right: 0;
+  width: min(210px, 100%);
+  padding: 6px;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: var(--control-shadow);
+}
+
+.home-screen__folder-action-menu > button {
+  display: block;
+  width: 100%;
+  padding: 10px 12px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.home-screen__folder-action-menu > button:hover { background: var(--control-hover); }
+.home-screen__folder-action-menu > button:focus-visible { outline: 2px solid #0057ff; outline-offset: -2px; }
+.home-screen__folder-action-colors {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+  padding: 8px 6px 6px;
+}
+
 .home-screen__profile {
   display: flex;
   align-items: center;
   gap: 10px;
   font-size: 14px;
 }
+
+.home-screen__profile-details { display: flex; flex-direction: column; line-height: 1.1; }
+.home-screen__profile-role { color: #8a8a8a; font-size: 12px; }
 
 .home-screen__avatar {
   flex: none;

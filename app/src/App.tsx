@@ -16,6 +16,7 @@ type BoardId = typeof boards[number]['id']
 const boardPath = (id: BoardId) => `/doska/${id}`
 const DASHBOARD_PAGE_COUNT = 10
 const CARDS_PER_PAGE = 15
+const MAX_FOLDER_NAME_LENGTH = 12
 const FOLDER_COLORS = TEXT_COLORS.filter(({ name }) => name !== 'Белый' && name !== 'Жёлтый')
 
 function paginationItems(current: number, total: number): Array<number | 'ellipsis'> {
@@ -44,17 +45,18 @@ export default function App() {
   const [dashboardPage, setDashboardPage] = useState(1)
   const [previews, setPreviews] = useState<Record<string, string>>({})
   const [openBoardMenuId, setOpenBoardMenuId] = useState<BoardId | null>(null)
+  const [openFolderMenuId, setOpenFolderMenuId] = useState<string | null>(null)
+  const [folderMenuColorsOpen, setFolderMenuColorsOpen] = useState(false)
   const [foldersActive, setFoldersActive] = useState(false)
   const [folderState, setFolderState] = useState(loadFolderState)
   const [folderDraft, setFolderDraft] = useState<{ id?: string; name: string; color: string } | null>(null)
-  const [folderColorOpen, setFolderColorOpen] = useState(false)
   const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null)
   const [folderMenuOpensLeft, setFolderMenuOpensLeft] = useState(false)
   const saveBoardRef = useRef<(() => Promise<string>) | null>(null)
   const boardMenuRef = useRef<HTMLDivElement>(null)
+  const folderMenuRef = useRef<HTMLDivElement>(null)
   const folderNameRef = useRef<HTMLInputElement>(null)
   const folderEditorRef = useRef<HTMLDivElement>(null)
-  const folderColorRef = useRef<HTMLDivElement>(null)
   const addFolderRef = useRef<HTMLButtonElement>(null)
   const isEditingFolder = folderDraft !== null
   const isCreatingFolder = folderDraft !== null && !folderDraft.id
@@ -77,27 +79,10 @@ export default function App() {
       if (!(event.target instanceof Node)) return
       if (folderEditorRef.current?.contains(event.target) || addFolderRef.current?.contains(event.target)) return
       setFolderDraft(null)
-      setFolderColorOpen(false)
     }
     document.addEventListener('pointerdown', cancelOutside)
     return () => document.removeEventListener('pointerdown', cancelOutside)
   }, [isCreatingFolder])
-
-  useEffect(() => {
-    if (!folderColorOpen) return
-    const closeOutside = (event: PointerEvent) => {
-      if (event.target instanceof Node && !folderColorRef.current?.contains(event.target)) setFolderColorOpen(false)
-    }
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setFolderColorOpen(false)
-    }
-    document.addEventListener('pointerdown', closeOutside)
-    document.addEventListener('keydown', closeOnEscape)
-    return () => {
-      document.removeEventListener('pointerdown', closeOutside)
-      document.removeEventListener('keydown', closeOnEscape)
-    }
-  }, [folderColorOpen])
 
   useEffect(() => {
     if (!openBoardMenuId) return
@@ -118,11 +103,32 @@ export default function App() {
   }, [openBoardMenuId])
 
   useEffect(() => {
+    if (!openFolderMenuId) return
+    const closeOutside = (event: PointerEvent) => {
+      if (event.target instanceof Node && !folderMenuRef.current?.contains(event.target)) {
+        setOpenFolderMenuId(null)
+        setFolderMenuColorsOpen(false)
+      }
+    }
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      setOpenFolderMenuId(null)
+      setFolderMenuColorsOpen(false)
+    }
+    document.addEventListener('pointerdown', closeOutside)
+    document.addEventListener('keydown', closeOnEscape)
+    return () => {
+      document.removeEventListener('pointerdown', closeOutside)
+      document.removeEventListener('keydown', closeOnEscape)
+    }
+  }, [openFolderMenuId])
+
+  useEffect(() => {
     let cancelled = false
     Promise.all(boards.map(async (board) => {
       try {
         const saved = await loadBoard(board.id)
-        return [board.id, saved ? renderBoardPreview(saved) : ''] as const
+        return [board.id, saved ? await renderBoardPreview(saved) : ''] as const
       }
       catch { return [board.id, ''] as const }
     })).then((entries) => { if (!cancelled) setPreviews(Object.fromEntries(entries)) })
@@ -161,14 +167,14 @@ export default function App() {
 
   const startFolder = () => {
     setFoldersActive(true)
+    setOpenFolderMenuId(null)
     if (folderDraft) { folderNameRef.current?.focus(); return }
-    setFolderColorOpen(false)
     setFolderDraft({ name: 'Без названия', color: '#272727' })
   }
 
   const saveFolder = () => {
     if (!folderDraft) return
-    const name = folderDraft.name.trim() || 'Без названия'
+    const name = folderDraft.name.trim().slice(0, MAX_FOLDER_NAME_LENGTH).trim() || 'Без названия'
     if (folderDraft.id) {
       setFolderState((current) => ({ ...current, folders: current.folders.map((folder) =>
         folder.id === folderDraft.id ? { ...folder, name, color: folderDraft.color } : folder) }))
@@ -177,7 +183,24 @@ export default function App() {
       setFolderState((current) => ({ ...current, folders: [folder, ...current.folders] }))
     }
     setFolderDraft(null)
-    setFolderColorOpen(false)
+  }
+
+  const deleteFolder = (id: string) => {
+    setFolderState((current) => ({
+      folders: current.folders.filter((folder) => folder.id !== id),
+      boardFolders: Object.fromEntries(Object.entries(current.boardFolders).map(([boardId, folderIds]) =>
+        [boardId, folderIds.filter((folderId) => folderId !== id)])),
+    }))
+    if (selectedFolderId === id) { setSelectedFolderId(null); setDashboardPage(1) }
+    setOpenFolderMenuId(null)
+    setFolderMenuColorsOpen(false)
+  }
+
+  const changeFolderColor = (id: string, color: string) => {
+    setFolderState((current) => ({ ...current, folders: current.folders.map((folder) =>
+      folder.id === id ? { ...folder, color } : folder) }))
+    setOpenFolderMenuId(null)
+    setFolderMenuColorsOpen(false)
   }
 
   const toggleBoardFolder = (boardId: BoardId, folderId: string) => {
@@ -197,30 +220,13 @@ export default function App() {
   const folderEditor = folderDraft && <div className="home-screen__folder-draft" ref={folderEditorRef}>
     <input ref={folderNameRef} value={folderDraft.name}
       aria-label={folderDraft.id ? 'Название папки' : 'Название новой папки'}
+      maxLength={MAX_FOLDER_NAME_LENGTH}
       style={{ color: folderDraft.color }}
       onChange={(event) => setFolderDraft((current) => current && { ...current, name: event.target.value })}
       onKeyDown={(event) => {
         if (event.key === 'Enter') saveFolder()
-        if (event.key === 'Escape') { setFolderDraft(null); setFolderColorOpen(false) }
+        if (event.key === 'Escape') setFolderDraft(null)
       }} />
-    <div className="home-screen__folder-color-control" ref={folderColorRef}>
-      <button className="home-screen__folder-color-toggle" type="button"
-        aria-label="Выбрать цвет папки" aria-expanded={folderColorOpen}
-        aria-controls={folderColorOpen ? 'home-screen-folder-color-menu' : undefined}
-        onClick={() => setFolderColorOpen((current) => !current)}>
-        <span style={{ backgroundColor: folderDraft.color }} />
-      </button>
-      {folderColorOpen && <div className="home-screen__folder-color-menu" id="home-screen-folder-color-menu"
-        role="group" aria-label="Цвет папки">
-        {FOLDER_COLORS.map(({ name, value }) => <button className="home-screen__folder-color" key={value}
-          type="button" aria-label={name} aria-pressed={folderDraft.color === value} title={name}
-          style={{ backgroundColor: value }}
-          onClick={() => {
-            setFolderDraft((current) => current && { ...current, color: value })
-            setFolderColorOpen(false)
-          }} />)}
-      </div>}
-    </div>
     <button className="home-screen__save-folder" type="button" aria-label="Сохранить папку"
       onClick={saveFolder}>
       <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -239,7 +245,8 @@ export default function App() {
         <div className="home-screen__folders-row">
           <button className="home-screen__folders" type="button" aria-expanded={foldersActive}
             aria-controls="home-screen-folder-list"
-            onClick={() => { setFoldersActive((current) => !current); setFolderColorOpen(false) }}>
+            onClick={() => { setFoldersActive((current) => !current)
+              setOpenFolderMenuId(null); setFolderMenuColorsOpen(false) }}>
             Папки<span className="home-screen__filter-arrow" aria-hidden="true" />
           </button>
           <button className="home-screen__add-folder" type="button" aria-label="Добавить папку" ref={addFolderRef}
@@ -252,20 +259,54 @@ export default function App() {
         {foldersActive && <div className="home-screen__folder-list" id="home-screen-folder-list">
           {folderDraft && !folderDraft.id && folderEditor}
           {folderState.folders.map((folder) => folderDraft?.id === folder.id ? <div key={folder.id}>{folderEditor}</div>
-            : <button className="home-screen__folder-item" type="button"
-            key={folder.id} aria-current={selectedFolderId === folder.id ? 'page' : undefined}
-            style={{ color: folder.color }} onClick={() => { setSelectedFolderId(folder.id); setDashboardPage(1) }}
-            onDoubleClick={() => {
-              setFolderDraft({ id: folder.id, name: folder.name, color: folder.color })
-              setFolderColorOpen(false)
-            }}>
-            {folder.name}
-          </button>)}
+            : <div className={`home-screen__folder-row${openFolderMenuId === folder.id ? ' home-screen__folder-row--menu-open' : ''}`}
+              key={folder.id} ref={openFolderMenuId === folder.id ? folderMenuRef : undefined}>
+              <button className="home-screen__folder-item" type="button"
+                aria-current={selectedFolderId === folder.id ? 'page' : undefined}
+                style={{ color: folder.color }} onClick={() => { setSelectedFolderId(folder.id); setDashboardPage(1) }}
+                onDoubleClick={() => {
+                  setFolderDraft({ id: folder.id, name: folder.name, color: folder.color })
+                  setOpenFolderMenuId(null)
+                }}>
+                {folder.name}
+              </button>
+              <button className="home-screen__card-menu-button home-screen__folder-menu-button" type="button"
+                aria-label={`Меню папки ${folder.name}`} aria-expanded={openFolderMenuId === folder.id}
+                aria-controls={openFolderMenuId === folder.id ? `folder-menu-${folder.id}` : undefined}
+                onClick={() => {
+                  setOpenBoardMenuId(null)
+                  setFolderMenuColorsOpen(false)
+                  setOpenFolderMenuId((current) => current === folder.id ? null : folder.id)
+                }}>
+                <img src={menuIcon} alt="" aria-hidden="true" />
+              </button>
+              {openFolderMenuId === folder.id && <div className="home-screen__folder-action-menu" id={`folder-menu-${folder.id}`}
+                role="menu" aria-label={`Действия с папкой ${folder.name}`}>
+                <button type="button" role="menuitem" onClick={() => deleteFolder(folder.id)}>Удалить</button>
+                <button type="button" role="menuitem" onClick={() => {
+                  setFolderDraft({ id: folder.id, name: folder.name, color: folder.color })
+                  setOpenFolderMenuId(null)
+                }}>Изменить название</button>
+                <button type="button" role="menuitem" aria-expanded={folderMenuColorsOpen}
+                  aria-controls={folderMenuColorsOpen ? `folder-menu-colors-${folder.id}` : undefined}
+                  onClick={() => setFolderMenuColorsOpen((current) => !current)}>Изменить цвет</button>
+                {folderMenuColorsOpen && <div className="home-screen__folder-action-colors"
+                  id={`folder-menu-colors-${folder.id}`} role="group" aria-label="Цвет папки">
+                  {FOLDER_COLORS.map(({ name, value }) => <button key={value} type="button"
+                    className="home-screen__folder-color" aria-label={name} title={name}
+                    aria-pressed={folder.color === value} style={{ backgroundColor: value }}
+                    onClick={() => changeFolderColor(folder.id, value)} />)}
+                </div>}
+              </div>}
+            </div>)}
         </div>}
       </nav>
       <div className="home-screen__profile">
         <span className="home-screen__avatar" aria-hidden="true" />
-        <span>Саламон Михаил</span>
+        <span className="home-screen__profile-details">
+          <span>Саламон Михаил</span>
+          <span className="home-screen__profile-role">Роль в системе</span>
+        </span>
       </div>
     </aside>
     <section className="home-screen__content" aria-label="Список досок">
@@ -299,7 +340,8 @@ export default function App() {
             <button className="home-screen__card-menu-button" type="button"
               aria-label={`Меню доски ${board.name}`} aria-expanded={openBoardMenuId === board.id}
               aria-controls={openBoardMenuId === board.id ? `board-card-menu-${board.id}` : undefined}
-              onClick={() => setOpenBoardMenuId((current) => current === board.id ? null : board.id)}>
+              onClick={() => { setOpenFolderMenuId(null); setFolderMenuColorsOpen(false)
+                setOpenBoardMenuId((current) => current === board.id ? null : board.id) }}>
               <img src={menuIcon} alt="" aria-hidden="true" />
             </button>
             {openBoardMenuId === board.id && <div id={`board-card-menu-${board.id}`} className="home-screen__card-menu">

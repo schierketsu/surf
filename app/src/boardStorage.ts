@@ -3,6 +3,7 @@ import type { TableItem } from './components/BoardTable/BoardTable'
 import type { DrawingItem } from './components/Drawing/Drawing'
 import type { StickerItem } from './components/Sticker/Sticker'
 import type { TextItem } from './components/TextBox/TextBox'
+import type { BoardImageItem } from './components/BoardImage/BoardImage'
 
 export type SavedBoard = {
   id: string
@@ -11,6 +12,7 @@ export type SavedBoard = {
   stickers: StickerItem[]
   tables: TableItem[]
   drawings: DrawingItem[]
+  images: BoardImageItem[]
   arrows: Arrow[]
   layerOrder: string[]
   preview: string

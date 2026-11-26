@@ -15,6 +15,7 @@ import Sticker, { type StickerItem } from './components/Sticker/Sticker'
 import StickerToolbar from './components/StickerToolbar/StickerToolbar'
 import Drawing, { drawingPath, type DrawingItem } from './components/Drawing/Drawing'
 import DrawingToolbar from './components/DrawingToolbar/DrawingToolbar'
+import BoardImage, { type BoardImageItem } from './components/BoardImage/BoardImage'
 import type { LayerAction } from './components/LayerMenuItems'
 import { loadBoard, saveBoard, type SavedBoard } from './boardStorage'
 import { renderBoardPreview } from './boardPreview'
@@ -22,11 +23,11 @@ import { boardObjectIds, normalizeLayerOrder } from './boardLayers'
 
 type View = { scale: number; x: number; y: number }
 type SelectionRect = { left: number; top: number; width: number; height: number }
-type BoardObjectKind = 'text' | 'sticker' | 'drawing' | 'arrow' | 'table'
+type BoardObjectKind = 'text' | 'sticker' | 'drawing' | 'arrow' | 'table' | 'image'
 type BoardContextMenu = { x: number; y: number; objectKind?: BoardObjectKind; objectId?: string }
 type FormatCommand = 'bold' | 'italic' | 'underline' | 'strikeThrough'
 type DrawingDraft = DrawingStyle & { points: Point[] }
-type GroupTransformSnapshot = { texts: TextItem[]; stickers: StickerItem[]; tables: TableItem[]; drawings: DrawingItem[]; arrows: Arrow[] }
+type GroupTransformSnapshot = { texts: TextItem[]; stickers: StickerItem[]; tables: TableItem[]; drawings: DrawingItem[]; images: BoardImageItem[]; arrows: Arrow[] }
 
 const MAX_SCALE = 4
 const WHEEL_ZOOM_SENSITIVITY = 0.002
@@ -39,7 +40,7 @@ const ARROW_DRAG_THRESHOLD = 6
 const OBJECT_CLIPBOARD_TYPE = 'application/x-doska-objects+json'
 const OBJECT_CLIPBOARD_PREFIX = 'DOSKA_OBJECTS_V1:'
 
-type ObjectClipboard = { version: 1; texts: TextItem[]; stickers: StickerItem[]; tables: TableItem[]; arrows: Arrow[]; drawings: DrawingItem[] }
+type ObjectClipboard = { version: 1; texts: TextItem[]; stickers: StickerItem[]; tables: TableItem[]; arrows: Arrow[]; drawings: DrawingItem[]; images: BoardImageItem[] }
 function occupiedConnectorKeys(items: Arrow[], exceptArrowId?: string) {
   const occupied = new Set<string>()
   for (const arrow of items) {
@@ -56,9 +57,26 @@ function parseObjectClipboard(value: string): ObjectClipboard | null {
     return data?.version === 1 && Array.isArray(data.texts) && Array.isArray(data.arrows)
       ? { ...data, stickers: Array.isArray(data.stickers) ? data.stickers : [],
         tables: Array.isArray(data.tables) ? data.tables : [],
-        drawings: Array.isArray(data.drawings) ? data.drawings : [] } as ObjectClipboard
+        drawings: Array.isArray(data.drawings) ? data.drawings : [],
+        images: Array.isArray(data.images) ? data.images : [] } as ObjectClipboard
       : null
   } catch { return null }
+}
+
+async function imageFromClipboard(file: File): Promise<{ src: string; width: number; height: number }> {
+  const src = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result))
+    reader.onerror = () => reject(reader.error)
+    reader.readAsDataURL(file)
+  })
+  const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+    const element = new Image()
+    element.onload = () => resolve(element)
+    element.onerror = () => reject(new Error('Не удалось прочитать изображение из буфера'))
+    element.src = src
+  })
+  return { src, width: image.naturalWidth, height: image.naturalHeight }
 }
 
 function htmlToPlainText(html: string) {
@@ -368,6 +386,7 @@ export default function BoardCanvas({ boardId, saveRef }: {
   const tablesRef = useRef<TableItem[]>([])
   const tableCellAnchorRef = useRef<{ tableId: string; row: number; column: number } | null>(null)
   const drawingsRef = useRef<DrawingItem[]>([])
+  const imagesRef = useRef<BoardImageItem[]>([])
   const connectableItemsRef = useRef<ConnectableItem[]>([])
   const arrowsRef = useRef<Arrow[]>([])
   const arrowGeometriesRef = useRef(new Map<string, ReturnType<typeof arrowGeometry>>())
@@ -395,9 +414,11 @@ export default function BoardCanvas({ boardId, saveRef }: {
   const [selectedTableCells, setSelectedTableCells] = useState<string[]>([])
   const [selectedTableLine, setSelectedTableLine] = useState<TableLineSelection | null>(null)
   const [drawings, setDrawings] = useState<DrawingItem[]>([])
+  const [images, setImages] = useState<BoardImageItem[]>([])
   const [drawingStyle, setDrawingStyle] = useState<DrawingStyle | null>(null)
   const [drawingDraft, setDrawingDraft] = useState<DrawingDraft | null>(null)
   const [selectedDrawingId, setSelectedDrawingId] = useState<string | null>(null)
+  const [selectedImageId, setSelectedImageId] = useState<string | null>(null)
   const [selectedStickerId, setSelectedStickerId] = useState<string | null>(null)
   const [editingStickerId, setEditingStickerId] = useState<string | null>(null)
   const [focusStickerId, setFocusStickerId] = useState<string | null>(null)
@@ -426,6 +447,7 @@ export default function BoardCanvas({ boardId, saveRef }: {
       setStickers(saved.stickers)
       setTables(saved.tables)
       setDrawings(saved.drawings)
+      setImages(saved.images ?? [])
       setArrows(saved.arrows)
       setLayerOrder(saved.layerOrder)
     }).catch((error) => console.error('Не удалось загрузить доску', error))
@@ -436,9 +458,9 @@ export default function BoardCanvas({ boardId, saveRef }: {
   const saveNow = async () => {
     if (!loaded) return ''
     const content: Omit<SavedBoard, 'preview'> = {
-      id: boardId, version: 1, texts, stickers, tables, drawings, arrows, layerOrder,
+      id: boardId, version: 1, texts, stickers, tables, drawings, images, arrows, layerOrder,
     }
-    const preview = renderBoardPreview(content)
+    const preview = await renderBoardPreview(content)
     await saveBoard({ ...content, preview })
     return preview
   }
@@ -450,19 +472,29 @@ export default function BoardCanvas({ boardId, saveRef }: {
     const timer = window.setTimeout(() => { void saveNow().catch((error) =>
       console.error('Не удалось сохранить доску', error)) }, 700)
     return () => window.clearTimeout(timer)
-  }, [loaded, texts, stickers, tables, drawings, arrows, layerOrder])
+  }, [loaded, texts, stickers, tables, drawings, images, arrows, layerOrder])
 
-  const allObjectIds = useMemo(() => boardObjectIds({ drawings, stickers, tables, texts, arrows }),
-    [drawings, stickers, tables, texts, arrows])
+  const allObjectIds = useMemo(() => boardObjectIds({ drawings, images, stickers, tables, texts, arrows }),
+    [drawings, images, stickers, tables, texts, arrows])
+  const allObjectIdsRef = useRef(allObjectIds)
+  allObjectIdsRef.current = allObjectIds
   const orderedObjectIds = useMemo(() => normalizeLayerOrder(layerOrder, allObjectIds), [layerOrder, allObjectIds])
   const objectLayers = useMemo(() => new Map(orderedObjectIds.map((id, index) => [id, index + 1])), [orderedObjectIds])
-  const selectedLayerIds = useMemo(() => selectedTableId ? [selectedTableId]
+  const placeNewObjectsOnTop = (ids: string[]) => {
+    const added = new Set(ids)
+    setLayerOrder((current) => [
+      ...normalizeLayerOrder(current, allObjectIdsRef.current).filter((id) => !added.has(id)),
+      ...ids,
+    ])
+  }
+  const selectedLayerIds = useMemo(() => selectedImageId ? [selectedImageId]
+    : selectedTableId ? [selectedTableId]
     : selectedArrowId ? [selectedArrowId]
     : selectedDrawingId ? [selectedDrawingId]
       : selectedStickerId ? [selectedStickerId]
         : multiSelectedIds.length ? multiSelectedIds
           : selectedId ? [selectedId] : [],
-  [selectedTableId, selectedArrowId, selectedDrawingId, selectedStickerId, multiSelectedIds, selectedId])
+  [selectedImageId, selectedTableId, selectedArrowId, selectedDrawingId, selectedStickerId, multiSelectedIds, selectedId])
   const changeObjectLayer = (ids: string[], action: LayerAction) => {
     setLayerOrder((current) => reorderLayers(normalizeLayerOrder(current, allObjectIds), ids, action))
   }
@@ -486,11 +518,56 @@ export default function BoardCanvas({ boardId, saveRef }: {
       fontSize: 16,
       align: 'center',
     }])
+    placeNewObjectsOnTop([id])
     setSelectedStickerId(id)
     setSelectedDrawingId(null)
+    setSelectedImageId(null)
     setSelectedId(null)
     setMultiSelectedIds([])
     setSelectedArrowId(null)
+  }
+
+  const pasteImageFiles = async (files: File[]) => {
+    const board = boardRef.current
+    const view = viewRef.current
+    if (!board || !view) return
+    const imagesToAdd = await Promise.all(files.map(imageFromClipboard))
+    const centerX = (board.clientWidth / 2 - view.x) / view.scale
+    const centerY = (board.clientHeight / 2 - view.y) / view.scale
+    const added = imagesToAdd.filter((image) => image.width > 0 && image.height > 0).map((image, index) => {
+      const factor = Math.min(1, 960 / image.width, 720 / image.height,
+        BOARD_WIDTH / image.width, BOARD_HEIGHT / image.height)
+      const width = image.width * factor
+      const height = image.height * factor
+      return { id: crypto.randomUUID(), src: image.src, width, height,
+        x: Math.max(0, Math.min(BOARD_WIDTH - width, centerX - width / 2 + index * 24)),
+        y: Math.max(0, Math.min(BOARD_HEIGHT - height, centerY - height / 2 + index * 24)) }
+    })
+    if (!added.length) return
+    setImages((current) => [...current, ...added])
+    placeNewObjectsOnTop(added.map((item) => item.id))
+    applyObjectSelection([])
+    setSelectedImageId(added.length === 1 ? added[0].id : null)
+    setMultiSelectedIds(added.length > 1 ? added.map((item) => item.id) : [])
+  }
+
+  const addPdfFile = async (file: File) => {
+    if (!file.name.toLowerCase().endsWith('.pdf') && file.type !== 'application/pdf') {
+      throw new Error('Поддерживаются только PDF-файлы')
+    }
+    const board = boardRef.current
+    const view = viewRef.current
+    if (!board || !view) throw new Error('Холст ещё не готов')
+    const center = { x: (board.clientWidth / 2 - view.x) / view.scale,
+      y: (board.clientHeight / 2 - view.y) / view.scale }
+    const { importPdfPages } = await import('./pdfImport')
+    const pages = await importPdfPages(file, center)
+    if (!pages.length) throw new Error('В PDF нет страниц')
+    setImages((current) => [...current, ...pages])
+    placeNewObjectsOnTop(pages.map((page) => page.id))
+    applyObjectSelection([])
+    setSelectedImageId(pages.length === 1 ? pages[0].id : null)
+    setMultiSelectedIds(pages.length > 1 ? pages.map((page) => page.id) : [])
   }
 
   const connectableItems = [...texts, ...stickers]
@@ -498,6 +575,7 @@ export default function BoardCanvas({ boardId, saveRef }: {
   stickersRef.current = stickers
   tablesRef.current = tables
   drawingsRef.current = drawings
+  imagesRef.current = images
   connectableItemsRef.current = connectableItems
   arrowsRef.current = arrows
   arrowDragRef.current = arrowDrag
@@ -638,10 +716,12 @@ export default function BoardCanvas({ boardId, saveRef }: {
           setArrows((current) => [...current, { id, tail, head,
             bend: initialBend(start, target, tail.side, head.side), color: '#272727',
             tailEnd: 'none', headEnd: 'arrow' }])
+          placeNewObjectsOnTop([id])
           setSelectedArrowId(id)
           setSelectedId(null)
           setSelectedStickerId(null)
           setSelectedDrawingId(null)
+          setSelectedImageId(null)
           setMultiSelectedIds([])
           setEditingId(null)
         }
@@ -717,6 +797,7 @@ export default function BoardCanvas({ boardId, saveRef }: {
       tables: tables.filter((item) => selected.has(item.id)).map((item) => ({ ...item })),
       drawings: drawings.filter((item) => selected.has(item.id)).map((item) => ({ ...item,
         points: item.points.map((point) => ({ ...point })) })),
+      images: images.filter((item) => selected.has(item.id)).map((item) => ({ ...item })),
       arrows: arrows.filter((item) => selected.has(item.id)).map((item) => ({ ...item,
         tail: { ...item.tail }, head: { ...item.head }, bend: { ...item.bend },
         curveBends: item.curveBends?.map((point) => ({ ...point })) as [Point, Point, Point] | undefined,
@@ -727,7 +808,7 @@ export default function BoardCanvas({ boardId, saveRef }: {
   const moveSelectedObjects = (startItems: GroupSelectionItem[], requestedDx: number, requestedDy: number) => {
     const snapshot = groupTransformStartRef.current
     if (!snapshot?.texts.length && !snapshot?.stickers.length && !snapshot?.tables.length
-      && !snapshot?.drawings.length && !snapshot?.arrows.length) return
+      && !snapshot?.drawings.length && !snapshot?.images.length && !snapshot?.arrows.length) return
     const left = Math.min(...startItems.map((item) => item.x))
     const top = Math.min(...startItems.map((item) => item.y))
     const right = Math.max(...startItems.map((item) => item.x + item.width))
@@ -738,6 +819,7 @@ export default function BoardCanvas({ boardId, saveRef }: {
     const stickerStarts = new Map(snapshot.stickers.map((item) => [item.id, item]))
     const tableStarts = new Map(snapshot.tables.map((item) => [item.id, item]))
     const drawingStarts = new Map(snapshot.drawings.map((item) => [item.id, item]))
+    const imageStarts = new Map(snapshot.images.map((item) => [item.id, item]))
     const arrowStarts = new Map(snapshot.arrows.map((item) => [item.id, item]))
     setTexts((current) => current.map((item) => {
       const start = textStarts.get(item.id)
@@ -753,6 +835,10 @@ export default function BoardCanvas({ boardId, saveRef }: {
     }))
     setDrawings((current) => current.map((item) => {
       const start = drawingStarts.get(item.id)
+      return start ? { ...item, x: start.x + dx, y: start.y + dy } : item
+    }))
+    setImages((current) => current.map((item) => {
+      const start = imageStarts.get(item.id)
       return start ? { ...item, x: start.x + dx, y: start.y + dy } : item
     }))
     const movePoint = (point: Point) => ({ x: point.x + dx, y: point.y + dy })
@@ -777,6 +863,7 @@ export default function BoardCanvas({ boardId, saveRef }: {
     const stickerStarts = new Map(snapshot.stickers.map((item) => [item.id, item]))
     const tableStarts = new Map(snapshot.tables.map((item) => [item.id, item]))
     const drawingStarts = new Map(snapshot.drawings.map((item) => [item.id, item]))
+    const imageStarts = new Map(snapshot.images.map((item) => [item.id, item]))
     const arrowStarts = new Map(snapshot.arrows.map((item) => [item.id, item]))
     const selectedConnectables = new Set([...snapshot.texts, ...snapshot.stickers].map((item) => item.id))
     setTexts((current) => current.map((item) => {
@@ -805,6 +892,11 @@ export default function BoardCanvas({ boardId, saveRef }: {
       return { ...item, ...scalePoint(start), width: start.width * factor, height: start.height * factor,
         strokeWidth: start.strokeWidth * factor,
         points: start.points.map((point) => ({ x: point.x * factor, y: point.y * factor })) }
+    }))
+    setImages((current) => current.map((item) => {
+      const start = imageStarts.get(item.id)
+      return start ? { ...item, ...scalePoint(start), width: start.width * factor,
+        height: start.height * factor } : item
     }))
     setArrows((current) => current.map((item) => {
       const start = arrowStarts.get(item.id)
@@ -854,6 +946,7 @@ export default function BoardCanvas({ boardId, saveRef }: {
     setSelectedStickerId(single && stickers.some((item) => item.id === single) ? single : null)
     setSelectedTableId(single && tables.some((item) => item.id === single) ? single : null)
     setSelectedDrawingId(single && drawings.some((item) => item.id === single) ? single : null)
+    setSelectedImageId(single && images.some((item) => item.id === single) ? single : null)
     setSelectedArrowId(single && arrows.some((item) => item.id === single) ? single : null)
     setEditingId(null)
     setFocusId(null)
@@ -868,12 +961,14 @@ export default function BoardCanvas({ boardId, saveRef }: {
         : selectedTableId ? [selectedTableId]
         : selectedStickerId ? [selectedStickerId]
           : selectedDrawingId ? [selectedDrawingId]
+            : selectedImageId ? [selectedImageId]
             : selectedArrowId ? [selectedArrowId] : []
     applyObjectSelection(current.includes(id) ? current.filter((item) => item !== id) : [...current, id])
   }
 
   const selectText = (id: string, additive = false) => {
     if (additive) { toggleObjectSelection(id); return }
+    setSelectedImageId(null)
     setSelectedTableId(null)
     setSelectedTableCells([])
     setSelectedArrowId(null)
@@ -896,6 +991,7 @@ export default function BoardCanvas({ boardId, saveRef }: {
 
   const selectSticker = (id: string, additive = false) => {
     if (additive) { toggleObjectSelection(id); return }
+    setSelectedImageId(null)
     setSelectedTableId(null)
     setSelectedTableCells([])
     const editor = editingId ? editorRefs.current.get(editingId) : null
@@ -912,6 +1008,7 @@ export default function BoardCanvas({ boardId, saveRef }: {
 
   const selectDrawing = (id: string, additive = false) => {
     if (additive) { toggleObjectSelection(id); return }
+    setSelectedImageId(null)
     setSelectedTableId(null)
     setSelectedTableCells([])
     clearTextSelection()
@@ -926,6 +1023,7 @@ export default function BoardCanvas({ boardId, saveRef }: {
 
   const selectArrow = (id: string, additive = false) => {
     if (additive) { toggleObjectSelection(id); return }
+    setSelectedImageId(null)
     setSelectedTableId(null)
     setSelectedTableCells([])
     clearTextSelection()
@@ -940,6 +1038,25 @@ export default function BoardCanvas({ boardId, saveRef }: {
 
   const changeDrawing = (id: string, changes: Partial<DrawingItem>) => {
     setDrawings((current) => current.map((drawing) => drawing.id === id ? { ...drawing, ...changes } : drawing))
+  }
+
+  const selectImage = (id: string, additive = false) => {
+    if (additive) { toggleObjectSelection(id); return }
+    clearTextSelection()
+    setSelectedId(null)
+    setSelectedStickerId(null)
+    setSelectedTableId(null)
+    setSelectedTableCells([])
+    setSelectedDrawingId(null)
+    setSelectedArrowId(null)
+    setMultiSelectedIds([])
+    setEditingId(null)
+    setEditingStickerId(null)
+    setSelectedImageId(id)
+  }
+
+  const changeImage = (id: string, changes: Partial<BoardImageItem>) => {
+    setImages((current) => current.map((image) => image.id === id ? { ...image, ...changes } : image))
   }
 
   const changeDrawingStrokeWidth = (id: string, width: number) => {
@@ -962,6 +1079,7 @@ export default function BoardCanvas({ boardId, saveRef }: {
   }
 
   const selectTable = (id: string, clearCells = true) => {
+    setSelectedImageId(null)
     if (clearCells && document.activeElement instanceof HTMLTextAreaElement
       && document.activeElement.classList.contains('board-table__cell')) document.activeElement.blur()
     clearTextSelection()
@@ -1264,12 +1382,14 @@ export default function BoardCanvas({ boardId, saveRef }: {
     setStickers((current) => current.filter((item) => !deleted.has(item.id)))
     setTables((current) => current.filter((item) => !deleted.has(item.id)))
     setDrawings((current) => current.filter((item) => !deleted.has(item.id)))
+    setImages((current) => current.filter((item) => !deleted.has(item.id)))
     setArrows((current) => current.filter((arrow) => !deleted.has(arrow.id)
       && !deleted.has(arrow.tail.textId ?? '') && !deleted.has(arrow.head.textId ?? '')))
     setSelectedId(null)
     setSelectedStickerId(null)
     setSelectedTableId(null)
     setSelectedDrawingId(null)
+    setSelectedImageId(null)
     setSelectedArrowId(null)
     setMultiSelectedIds([])
     setEditingId(null)
@@ -1281,9 +1401,13 @@ export default function BoardCanvas({ boardId, saveRef }: {
 
   const selectedObjectClipboard = (): ObjectClipboard | null => {
     if (selectedArrowId) return null
+    if (selectedImageId) {
+      const image = images.find((item) => item.id === selectedImageId)
+      return image ? { version: 1, texts: [], stickers: [], tables: [], arrows: [], drawings: [], images: [image] } : null
+    }
     if (selectedTableId) {
       const table = tables.find((item) => item.id === selectedTableId)
-      return table ? { version: 1, texts: [], stickers: [], tables: [table], arrows: [], drawings: [] } : null
+      return table ? { version: 1, texts: [], stickers: [], tables: [table], arrows: [], drawings: [], images: [] } : null
     }
     if (selectedStickerId) {
       const sticker = stickers.find((item) => item.id === selectedStickerId)
@@ -1294,6 +1418,7 @@ export default function BoardCanvas({ boardId, saveRef }: {
         tables: [],
         arrows: [],
         drawings: [],
+        images: [],
       } : null
     }
     if (selectedDrawingId) {
@@ -1305,6 +1430,7 @@ export default function BoardCanvas({ boardId, saveRef }: {
         tables: [],
         arrows: [],
         drawings: [{ ...drawing, points: drawing.points.map((point) => ({ ...point })) }],
+        images: [],
       } : null
     }
     const ids = new Set(multiSelectedIds.length ? multiSelectedIds : selectedId ? [selectedId] : [])
@@ -1318,6 +1444,7 @@ export default function BoardCanvas({ boardId, saveRef }: {
       arrows: [],
       drawings: drawings.filter((item) => ids.has(item.id)).map((item) => ({ ...item,
         points: item.points.map((point) => ({ ...point })) })),
+      images: images.filter((item) => ids.has(item.id)),
     }
   }
 
@@ -1338,13 +1465,14 @@ export default function BoardCanvas({ boardId, saveRef }: {
   }
 
   const pasteObjects = (payload: ObjectClipboard) => {
-    if (!payload.texts.length && !payload.stickers.length && !payload.tables.length && !payload.drawings.length) return
+    if (!payload.texts.length && !payload.stickers.length && !payload.tables.length && !payload.drawings.length && !payload.images.length) return
     const view = viewRef.current
     const offset = 24 * ++pasteCountRef.current / (view?.scale ?? 1)
     const sourceTexts = payload.texts
     const sourceStickers = payload.stickers
     const sourceTables = payload.tables
     const sourceDrawings = payload.drawings
+    const sourceImages = payload.images
     const bounds: Point[] = sourceTexts.flatMap((item) => [
       { x: item.x, y: item.y }, { x: item.x + item.width, y: item.y + item.height },
     ]).concat(sourceDrawings.flatMap((item) => [
@@ -1354,6 +1482,8 @@ export default function BoardCanvas({ boardId, saveRef }: {
     ])).concat(sourceTables.flatMap((item) => [
       { x: item.x, y: item.y },
       { x: item.x + tableWidth(item), y: item.y + tableHeight(item) },
+    ])).concat(sourceImages.flatMap((item) => [
+      { x: item.x, y: item.y }, { x: item.x + item.width, y: item.y + item.height },
     ]))
     const minX = Math.min(...bounds.map((point) => point.x))
     const maxX = Math.max(...bounds.map((point) => point.x))
@@ -1370,17 +1500,23 @@ export default function BoardCanvas({ boardId, saveRef }: {
       cells: item.cells.map((row) => row.map((cell) => ({ ...cell }))) }))
     const newDrawings = sourceDrawings.map((item) => ({ ...item, id: crypto.randomUUID(),
       x: item.x + dx, y: item.y + dy, points: item.points.map((point) => ({ ...point })) }))
+    const newImages = sourceImages.map((item) => ({ ...item, id: crypto.randomUUID(), x: item.x + dx, y: item.y + dy }))
     setTexts((current) => [...current, ...newTexts])
     setStickers((current) => [...current, ...newStickers])
     setTables((current) => [...current, ...newTables])
     setDrawings((current) => [...current, ...newDrawings])
+    setImages((current) => [...current, ...newImages])
+    placeNewObjectsOnTop([
+      ...newDrawings, ...newImages, ...newStickers, ...newTables, ...newTexts,
+    ].map((item) => item.id))
     setEditingId(null)
     setFocusId(null)
-    const newIds = [...newDrawings.map((item) => item.id), ...newStickers.map((item) => item.id),
+    const newIds = [...newImages.map((item) => item.id), ...newDrawings.map((item) => item.id), ...newStickers.map((item) => item.id),
       ...newTables.map((item) => item.id), ...newTexts.map((item) => item.id)]
     setMultiSelectedIds(newIds.length > 1 ? newIds : [])
     setSelectedId(newIds.length === 1 && newTexts.length === 1 ? newTexts[0].id : null)
     setSelectedDrawingId(newIds.length === 1 && newDrawings.length === 1 ? newDrawings[0].id : null)
+    setSelectedImageId(newIds.length === 1 && newImages.length === 1 ? newImages[0].id : null)
     setSelectedStickerId(newIds.length === 1 && newStickers.length === 1 ? newStickers[0].id : null)
     setSelectedTableId(newIds.length === 1 && newTables.length === 1 ? newTables[0].id : null)
     setSelectedTableCells([])
@@ -1431,16 +1567,26 @@ export default function BoardCanvas({ boardId, saveRef }: {
       const plain = event.clipboardData?.getData('text/plain')
       const payload = custom ? parseObjectClipboard(custom)
         : plain?.startsWith(OBJECT_CLIPBOARD_PREFIX) ? parseObjectClipboard(plain) : null
-      if (!payload) return
+      if (payload) {
+        event.preventDefault()
+        objectClipboardRef.current = payload
+        pasteObjects(payload)
+        return
+      }
+      const itemFiles = Array.from(event.clipboardData?.items ?? [])
+        .filter((item) => item.kind === 'file' && item.type.startsWith('image/'))
+        .map((item) => item.getAsFile()).filter((file): file is File => file !== null)
+      const files = itemFiles.length ? itemFiles
+        : Array.from(event.clipboardData?.files ?? []).filter((file) => file.type.startsWith('image/'))
+      if (!files.length) return
       event.preventDefault()
-      objectClipboardRef.current = payload
-      pasteObjects(payload)
+      void pasteImageFiles(files).catch((error) => console.error('Не удалось вставить изображение', error))
     }
     window.addEventListener('copy', onCopy)
     window.addEventListener('paste', onPaste)
     return () => { window.removeEventListener('copy', onCopy); window.removeEventListener('paste', onPaste) }
-  }, [texts, stickers, tables, arrows, drawings, selectedId, multiSelectedIds, selectedStickerId,
-    selectedTableId, selectedTableCells, selectedArrowId, selectedDrawingId, navigationMode])
+  }, [texts, stickers, tables, arrows, drawings, images, selectedId, multiSelectedIds, selectedStickerId,
+    selectedTableId, selectedTableCells, selectedArrowId, selectedDrawingId, selectedImageId, navigationMode])
 
   useEffect(() => {
     if (!boardContextMenu) return
@@ -1523,6 +1669,21 @@ export default function BoardCanvas({ boardId, saveRef }: {
     window.addEventListener('keydown', onDrawingKey)
     return () => window.removeEventListener('keydown', onDrawingKey)
   }, [selectedDrawingId, navigationMode])
+
+  useEffect(() => {
+    if (!selectedImageId || navigationMode !== 'cursor') return
+    const onImageKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') { setSelectedImageId(null); return }
+      if (event.key !== 'Delete' || event.defaultPrevented) return
+      const target = event.target
+      if (target instanceof HTMLElement && (target.isContentEditable || target.closest('input, textarea, select'))) return
+      event.preventDefault()
+      setImages((current) => current.filter((image) => image.id !== selectedImageId))
+      setSelectedImageId(null)
+    }
+    window.addEventListener('keydown', onImageKey)
+    return () => window.removeEventListener('keydown', onImageKey)
+  }, [selectedImageId, navigationMode])
 
   useEffect(() => {
     if (!selectedTableId || navigationMode !== 'cursor') return
@@ -1826,6 +1987,7 @@ export default function BoardCanvas({ boardId, saveRef }: {
         setSelectedArrowId(null)
         setSelectedStickerId(null)
         setSelectedDrawingId(null)
+        setSelectedImageId(null)
         setSelectedId(null)
         setMultiSelectedIds([])
         setEditingId(null)
@@ -1856,6 +2018,7 @@ export default function BoardCanvas({ boardId, saveRef }: {
           columnWidths: Array(columns).fill(TABLE_CELL_WIDTH), cellHeight: TABLE_CELL_HEIGHT,
           rowHeights: Array(rows).fill(TABLE_CELL_HEIGHT), rowMinHeights: Array(rows).fill(TABLE_CELL_HEIGHT), fontSize: 16,
           cells: Array.from({ length: rows }, () => Array.from({ length: columns }, createTableCell)) }])
+        placeNewObjectsOnTop([id])
         selectTable(id)
         tableModeRef.current = null
         setResetToCursorToken((current) => current + 1)
@@ -1877,6 +2040,7 @@ export default function BoardCanvas({ boardId, saveRef }: {
           fontFamily: "'Doska', Arial, sans-serif", color: '#272727', highlight: 'transparent',
           align: 'left', opacity: 1, comment: '',
         }])
+        placeNewObjectsOnTop([id])
         setSelectedId(id)
         setSelectedTableId(null)
         setMultiSelectedIds([])
@@ -1903,6 +2067,7 @@ export default function BoardCanvas({ boardId, saveRef }: {
         setSelectedTableCells([])
         setSelectedStickerId(null)
         setSelectedDrawingId(null)
+        setSelectedImageId(null)
         setSelectedId(null)
         setMultiSelectedIds([])
         setEditingId(null)
@@ -1968,6 +2133,7 @@ export default function BoardCanvas({ boardId, saveRef }: {
           const drawing = drawingFromDraft(drawingGesture)
           if (drawing) {
             setDrawings((current) => [...current, drawing])
+            placeNewObjectsOnTop([drawing.id])
             setSelectedDrawingId(drawing.id)
           }
         }
@@ -1995,18 +2161,20 @@ export default function BoardCanvas({ boardId, saveRef }: {
           const tableIds = tablesRef.current.filter((item) => overlaps({ x: item.x, y: item.y,
             width: tableWidth(item), height: tableHeight(item) })).map((item) => item.id)
           const drawingIds = drawingsRef.current.filter(overlaps).map((item) => item.id)
+          const imageIds = imagesRef.current.filter(overlaps).map((item) => item.id)
           const arrowIds = arrowsRef.current.filter((arrow) => {
             const geometry = arrowGeometriesRef.current.get(arrow.id)
             if (!geometry) return false
             return overlaps(arrowSelectionBounds(geometry, 8 / view.scale))
           }).map((arrow) => arrow.id)
-          const ids = [...drawingIds, ...stickerIds, ...tableIds, ...textIds, ...arrowIds]
+          const ids = [...drawingIds, ...imageIds, ...stickerIds, ...tableIds, ...textIds, ...arrowIds]
           const single = ids.length === 1 ? ids[0] : null
           setSelectedId(single && textIds.includes(single) ? single : null)
           setSelectedStickerId(single && stickerIds.includes(single) ? single : null)
           setSelectedTableId(single && tableIds.includes(single) ? single : null)
           setSelectedTableCells([])
           setSelectedDrawingId(single && drawingIds.includes(single) ? single : null)
+          setSelectedImageId(single && imageIds.includes(single) ? single : null)
           setSelectedArrowId(single && arrowIds.includes(single) ? single : null)
           setMultiSelectedIds(ids.length > 1 ? ids : [])
         }
@@ -2092,6 +2260,12 @@ export default function BoardCanvas({ boardId, saveRef }: {
         width: drawing.width, height: drawing.height })
       return
     }
+    const image = images.find((item) => item.id === id)
+    if (image) {
+      selectedGroupItems.push({ id, kind: 'image', x: image.x, y: image.y,
+        width: image.width, height: image.height })
+      return
+    }
     const geometry = arrowGeometries.get(id)
     if (geometry) selectedGroupItems.push({ id, kind: 'arrow', ...arrowSelectionBounds(geometry, 8 / (viewState?.scale ?? 1)) })
   })
@@ -2156,6 +2330,7 @@ export default function BoardCanvas({ boardId, saveRef }: {
           if (objectKind === 'text') selectText(objectId)
           else if (objectKind === 'sticker') selectSticker(objectId)
           else if (objectKind === 'drawing') selectDrawing(objectId)
+          else if (objectKind === 'image') selectImage(objectId)
           else if (objectKind === 'table') selectTable(objectId)
           else selectArrow(objectId)
           setBoardContextMenu({ x: event.clientX, y: event.clientY, objectKind, objectId })
@@ -2202,6 +2377,12 @@ export default function BoardCanvas({ boardId, saveRef }: {
           groupSelected={multiSelectedIds.includes(drawing.id)}
           interactive={navigationMode === 'cursor' && !drawingStyle} scale={viewState.scale} layer={objectLayers.get(drawing.id) ?? 1}
           onSelect={selectDrawing} onChange={changeDrawing} />)}
+        {images.map((image) => <BoardImage key={image.id} item={image}
+          selected={selectedImageId === image.id || multiSelectedIds.includes(image.id)}
+          groupSelected={multiSelectedIds.includes(image.id)}
+          interactive={navigationMode === 'cursor' && !drawingStyle}
+          scale={viewState.scale} layer={objectLayers.get(image.id) ?? 1}
+          onSelect={selectImage} onChange={changeImage} />)}
         {drawingDraft && <svg className="board-drawing-preview" style={{ zIndex: orderedObjectIds.length + 2 }} width={BOARD_WIDTH} height={BOARD_HEIGHT}
           viewBox={`0 0 ${BOARD_WIDTH} ${BOARD_HEIGHT}`} aria-hidden="true">
           <path d={drawingPath(drawingDraft.points)} fill="none" stroke={drawingDraft.color}
@@ -2339,6 +2520,9 @@ export default function BoardCanvas({ boardId, saveRef }: {
             else if (objectKind === 'drawing') {
               setDrawings((current) => current.filter((drawing) => drawing.id !== objectId))
               setSelectedDrawingId(null)
+            } else if (objectKind === 'image') {
+              setImages((current) => current.filter((image) => image.id !== objectId))
+              setSelectedImageId(null)
             } else {
               setArrows((current) => current.filter((arrow) => arrow.id !== objectId))
               setSelectedArrowId(null)
@@ -2354,11 +2538,12 @@ export default function BoardCanvas({ boardId, saveRef }: {
           <button type="button" role="menuitem" disabled><span>Комментарий</span></button>
         </>}
       </div>}
-      <ToolPanel resetToCursorToken={resetToCursorToken} boardScale={viewState?.scale ?? 1} onNavigationModeChange={(mode) => {
+      <ToolPanel resetToCursorToken={resetToCursorToken} boardScale={viewState?.scale ?? 1} onPdfFile={addPdfFile} onNavigationModeChange={(mode) => {
         navigationModeRef.current = mode
         setNavigationMode(mode)
         if (mode === 'hand') {
           setSelectedTableId(null)
+          setSelectedImageId(null)
           if (document.activeElement instanceof HTMLElement) document.activeElement.blur()
           clearTextSelection()
           setSelectedId(null)
@@ -2375,6 +2560,7 @@ export default function BoardCanvas({ boardId, saveRef }: {
         if (sticker) {
           tableModeRef.current = null
           setSelectedTableId(null)
+          setSelectedImageId(null)
           textModeRef.current = false
           canvasRef.current?.classList.remove('is-text-mode')
           clearTextSelection()
@@ -2391,6 +2577,7 @@ export default function BoardCanvas({ boardId, saveRef }: {
         textModeRef.current = active
         if (active) tableModeRef.current = null
         if (active) setSelectedTableId(null)
+        setSelectedImageId(null)
         canvasRef.current?.classList.toggle('is-text-mode', active)
         clearTextSelection()
         setSelectedId(null)
@@ -2406,6 +2593,7 @@ export default function BoardCanvas({ boardId, saveRef }: {
         if (style) {
           tableModeRef.current = null
           setSelectedTableId(null)
+          setSelectedImageId(null)
           textModeRef.current = false
           stickerModeRef.current = null
           canvasRef.current?.classList.remove('is-text-mode', 'is-sticker-mode')
@@ -2421,6 +2609,7 @@ export default function BoardCanvas({ boardId, saveRef }: {
       }} onTableToolChange={(size) => {
         tableModeRef.current = size
         if (size) {
+          setSelectedImageId(null)
           textModeRef.current = false
           stickerModeRef.current = null
           drawingModeRef.current = null

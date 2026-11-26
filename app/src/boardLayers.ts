@@ -2,6 +2,7 @@ type WithId = { id: string }
 
 export function boardObjectIds(board: {
   drawings: WithId[]
+  images: WithId[]
   stickers: WithId[]
   tables: WithId[]
   texts: WithId[]
@@ -9,6 +10,7 @@ export function boardObjectIds(board: {
 }) {
   return [
     ...board.drawings.map((item) => item.id),
+    ...board.images.map((item) => item.id),
     ...board.stickers.map((item) => item.id),
     ...board.tables.map((item) => item.id),
     ...board.texts.map((item) => item.id),

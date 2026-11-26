@@ -118,6 +118,17 @@
   display: block;
 }
 
+.tool-panel__pdf-icon { width: 22px; height: 22px; }
+.tool-panel__file-input { display: none; }
+.tool-panel__button:disabled { opacity: .5; cursor: wait; }
+.tool-panel__pdf-status, .tool-panel__pdf-error {
+  position: fixed; top: 20px; left: 50%; z-index: 1000; transform: translateX(-50%);
+  max-width: calc(100vw - 32px); padding: 10px 12px; border-radius: 10px;
+  background: var(--control-background); box-shadow: var(--control-shadow);
+  font-size: 13px; line-height: 1.35; text-align: center; }
+.tool-panel__pdf-status { white-space: nowrap; pointer-events: none; }
+.tool-panel__pdf-error { width: max-content; max-width: min(320px, calc(100vw - 32px)); color: #E60023; }
+
 .tool-panel__sticker-icon {
   width: 22px;
   height: 22px;

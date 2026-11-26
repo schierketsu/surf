@@ -47,9 +47,9 @@ function drawText(context: CanvasRenderingContext2D, value: string, x: number, y
   context.restore()
 }
 
-export function renderBoardPreview(board: BoardContent) {
+export async function renderBoardPreview(board: BoardContent) {
   if (!board.texts.length && !board.stickers.length && !board.tables.length
-    && !board.drawings.length && !board.arrows.length) return ''
+    && !board.drawings.length && !(board.images?.length ?? 0) && !board.arrows.length) return ''
   const canvas = document.createElement('canvas')
   canvas.width = PREVIEW_WIDTH
   canvas.height = PREVIEW_HEIGHT
@@ -60,6 +60,17 @@ export function renderBoardPreview(board: BoardContent) {
   context.scale(PREVIEW_WIDTH / BOARD_WIDTH, PREVIEW_HEIGHT / BOARD_HEIGHT)
 
   const objects = new Map<string, () => void>()
+  const previewImages = board.images ?? []
+  const loadedImages = await Promise.all(previewImages.map((item) => new Promise<HTMLImageElement | null>((resolve) => {
+    const image = new Image()
+    image.onload = () => resolve(image)
+    image.onerror = () => resolve(null)
+    image.src = item.src
+  })))
+  previewImages.forEach((item, index) => objects.set(item.id, () => {
+    const image = loadedImages[index]
+    if (image) context.drawImage(image, item.x, item.y, item.width, item.height)
+  }))
   for (const item of board.texts) objects.set(item.id, () => {
     context.save()
     context.globalAlpha = item.opacity
@@ -138,6 +149,6 @@ export function renderBoardPreview(board: BoardContent) {
     }
     context.restore()
   })
-  for (const id of normalizeLayerOrder(board.layerOrder, boardObjectIds(board))) objects.get(id)?.()
+  for (const id of normalizeLayerOrder(board.layerOrder, boardObjectIds({ ...board, images: previewImages }))) objects.get(id)?.()
   return canvas.toDataURL('image/webp', .8)
 }
