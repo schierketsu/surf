@@ -1,5 +1,5 @@
 import { getDocument, GlobalWorkerOptions } from 'pdfjs-dist'
-import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
+import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?worker&url'
 import type { BoardImageItem } from './components/BoardImage/BoardImage'
 import { BOARD_HEIGHT, BOARD_WIDTH } from './gridHierarchy'
 
