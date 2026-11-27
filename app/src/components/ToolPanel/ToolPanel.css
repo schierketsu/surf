@@ -121,10 +121,10 @@
 .tool-panel__pdf-icon { width: 22px; height: 22px; }
 .tool-panel__pdf-anchor { position: relative; width: 36px; height: 36px; flex: none; }
 .tool-panel__pdf-menu { position: absolute; left: calc(100% + 12px); top: 50%; z-index: 3;
-  display: grid; gap: 4px; width: 166px; padding: 6px; transform: translateY(-50%);
+  display: grid; gap: 4px; width: max-content; min-width: 166px; padding: 6px; transform: translateY(-50%);
   border-radius: var(--control-radius); background: var(--control-background); box-shadow: var(--control-shadow); }
 .tool-panel__pdf-menu button { padding: 10px 12px; border: 0; border-radius: 8px;
-  background: transparent; color: var(--control-text); font: inherit; font-size: 13px;
+  background: transparent; color: var(--control-text); font: inherit;
   text-align: left; white-space: nowrap; cursor: pointer; }
 .tool-panel__pdf-menu button:hover { background: var(--control-hover); }
 .tool-panel__pdf-menu button:focus-visible { outline: 2px solid #0057ff; outline-offset: -2px; }

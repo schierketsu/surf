@@ -16,7 +16,7 @@ import StickerToolbar from './components/StickerToolbar/StickerToolbar'
 import Drawing, { drawingPath, type DrawingItem } from './components/Drawing/Drawing'
 import DrawingToolbar from './components/DrawingToolbar/DrawingToolbar'
 import BoardImage, { type BoardImageItem, type PdfFramePage } from './components/BoardImage/BoardImage'
-import type { PdfImportMode } from './pdfImport'
+import type { DocumentImportMode } from './documentImport'
 import type { LayerAction } from './components/LayerMenuItems'
 import { loadBoard, saveBoard, type SavedBoard } from './boardStorage'
 import { renderBoardPreview } from './boardPreview'
@@ -44,7 +44,8 @@ const FRAME_PAGE_CLIPBOARD_TYPE = 'application/x-doska-frame-page+json'
 const FRAME_PAGE_CLIPBOARD_PREFIX = 'DOSKA_FRAME_PAGE_V1:'
 
 type ObjectClipboard = { version: 1; texts: TextItem[]; stickers: StickerItem[]; tables: TableItem[]; arrows: Arrow[]; drawings: DrawingItem[]; images: BoardImageItem[] }
-type FramePageClipboard = { version: 1; frameId: string; page: PdfFramePage }
+type FramePageClipboard = { version: 1; frameId: string; pages: PdfFramePage[] }
+type FramePageSelection = { frameId: string; pageIds: string[]; anchorId: string }
 function occupiedConnectorKeys(items: Arrow[], exceptArrowId?: string) {
   const occupied = new Set<string>()
   for (const arrow of items) {
@@ -71,11 +72,11 @@ function parseFramePageClipboard(value: string): FramePageClipboard | null {
   try {
     const data = JSON.parse(value.startsWith(FRAME_PAGE_CLIPBOARD_PREFIX)
       ? value.slice(FRAME_PAGE_CLIPBOARD_PREFIX.length) : value)
-    const page = data?.page
-    return data?.version === 1 && typeof data.frameId === 'string'
-      && typeof page?.id === 'string' && typeof page.src === 'string'
-      && ['x', 'y', 'width', 'height'].every((key) => Number.isFinite(page[key]))
-      ? data as FramePageClipboard : null
+    const pages = Array.isArray(data?.pages) ? data.pages : data?.page ? [data.page] : []
+    return data?.version === 1 && typeof data.frameId === 'string' && pages.length > 0
+      && pages.every((page: PdfFramePage) => typeof page?.id === 'string' && typeof page.src === 'string'
+        && (['x', 'y', 'width', 'height'] as const).every((key) => Number.isFinite(page[key])))
+      ? { version: 1, frameId: data.frameId, pages } : null
   } catch { return null }
 }
 
@@ -436,7 +437,7 @@ export default function BoardCanvas({ boardId, saveRef }: {
   const [drawingDraft, setDrawingDraft] = useState<DrawingDraft | null>(null)
   const [selectedDrawingId, setSelectedDrawingId] = useState<string | null>(null)
   const [selectedImageId, setSelectedImageId] = useState<string | null>(null)
-  const [selectedFramePage, setSelectedFramePage] = useState<{ frameId: string; pageId: string } | null>(null)
+  const [selectedFramePage, setSelectedFramePage] = useState<FramePageSelection | null>(null)
   const [selectedStickerId, setSelectedStickerId] = useState<string | null>(null)
   const [editingStickerId, setEditingStickerId] = useState<string | null>(null)
   const [focusStickerId, setFocusStickerId] = useState<string | null>(null)
@@ -573,7 +574,7 @@ export default function BoardCanvas({ boardId, saveRef }: {
     setMultiSelectedIds(added.length > 1 ? added.map((item) => item.id) : [])
   }
 
-  const addPdfFile = async (file: File, mode: PdfImportMode) => {
+  const addDocumentFile = async (file: File, mode: DocumentImportMode) => {
     if (!file.name.toLowerCase().endsWith('.pdf') && file.type !== 'application/pdf') {
       throw new Error('Поддерживаются только PDF-файлы')
     }
@@ -1084,14 +1085,35 @@ export default function BoardCanvas({ boardId, saveRef }: {
     setImages((current) => current.map((image) => image.id === id ? { ...image, ...changes } : image))
   }
 
-  const selectFramePage = (frameId: string, pageId: string) => {
-    selectImage(frameId)
-    setSelectedFramePage({ frameId, pageId })
+  const selectFramePage = (frameId: string, pageId: string, additive = false, range = false) => {
+    const frame = images.find((image) => image.id === frameId)
+    const pages = frame?.framePages ?? []
+    if (!pages.some((page) => page.id === pageId)) return
+    if (selectedImageId !== frameId || !selectedFramePage || selectedFramePage.frameId !== frameId) {
+      selectImage(frameId)
+      setSelectedFramePage({ frameId, pageIds: [pageId], anchorId: pageId })
+      return
+    }
+    if (range) {
+      const anchor = pages.findIndex((page) => page.id === selectedFramePage.anchorId)
+      const target = pages.findIndex((page) => page.id === pageId)
+      const ids = pages.slice(Math.min(anchor < 0 ? target : anchor, target),
+        Math.max(anchor < 0 ? target : anchor, target) + 1).map((page) => page.id)
+      setSelectedFramePage({ frameId, pageIds: additive
+        ? [...new Set([...selectedFramePage.pageIds, ...ids])] : ids, anchorId: selectedFramePage.anchorId })
+    } else if (additive) {
+      const ids = selectedFramePage.pageIds.includes(pageId)
+        ? selectedFramePage.pageIds.filter((id) => id !== pageId)
+        : [...selectedFramePage.pageIds, pageId]
+      setSelectedFramePage(ids.length ? { frameId, pageIds: ids,
+        anchorId: ids.includes(pageId) ? pageId : ids[ids.length - 1] } : null)
+    } else setSelectedFramePage({ frameId, pageIds: [pageId], anchorId: pageId })
   }
 
-  const deleteFramePage = (frameId: string, pageId: string) => {
+  const deleteFramePages = (frameId: string, pageIds: string[]) => {
+    const ids = new Set(pageIds)
     setImages((current) => current.map((image) => image.id === frameId
-      ? { ...image, framePages: image.framePages?.filter((page) => page.id !== pageId) } : image))
+      ? { ...image, framePages: image.framePages?.filter((page) => !ids.has(page.id)) } : image))
     setSelectedFramePage(null)
   }
 
@@ -1503,9 +1525,10 @@ export default function BoardCanvas({ boardId, saveRef }: {
 
   const selectedFramePageClipboard = (): FramePageClipboard | null => {
     if (!selectedFramePage) return null
-    const page = images.find((image) => image.id === selectedFramePage.frameId)?.framePages
-      ?.find((item) => item.id === selectedFramePage.pageId)
-    return page ? { version: 1, frameId: selectedFramePage.frameId, page: { ...page } } : null
+    const ids = new Set(selectedFramePage.pageIds)
+    const pages = images.find((image) => image.id === selectedFramePage.frameId)?.framePages
+      ?.filter((page) => ids.has(page.id)).map((page) => ({ ...page })) ?? []
+    return pages.length ? { version: 1, frameId: selectedFramePage.frameId, pages } : null
   }
 
   const writeFramePageClipboard = (payload: FramePageClipboard) => {
@@ -1527,16 +1550,20 @@ export default function BoardCanvas({ boardId, saveRef }: {
       image.id === selectedImageId && image.framePages) ? selectedImageId : payload.frameId)
     const frame = images.find((image) => image.id === frameId && image.framePages)
     if (!frame || !frame.framePages) return false
-    const source = payload.page
-    const maxX = Math.max(0, frame.width - source.width)
-    const maxY = Math.max(0, frame.height - source.height)
-    const page = { ...source, id: crypto.randomUUID(),
-      x: Math.max(0, Math.min(maxX, source.x + (source.x + 24 <= maxX ? 24 : -24))),
-      y: Math.max(0, Math.min(maxY, source.y + (source.y + 24 <= maxY ? 24 : -24))) }
+    const sources = payload.pages
+    const offset = (availablePositive: number, availableNegative: number) =>
+      availablePositive >= 24 ? 24 : availableNegative >= 24 ? -24 : 0
+    const dx = offset(Math.min(...sources.map((page) => frame.width - page.x - page.width)),
+      Math.min(...sources.map((page) => page.x)))
+    const dy = offset(Math.min(...sources.map((page) => frame.height - page.y - page.height)),
+      Math.min(...sources.map((page) => page.y)))
+    const pages = sources.map((source) => ({ ...source, id: crypto.randomUUID(),
+      x: Math.max(0, Math.min(frame.width - source.width, source.x + dx)),
+      y: Math.max(0, Math.min(frame.height - source.height, source.y + dy)) }))
     setImages((current) => current.map((image) => image.id === frame.id
-      ? { ...image, framePages: [...(image.framePages ?? []), page] } : image))
+      ? { ...image, framePages: [...(image.framePages ?? []), ...pages] } : image))
     setSelectedImageId(frame.id)
-    setSelectedFramePage({ frameId: frame.id, pageId: page.id })
+    setSelectedFramePage({ frameId: frame.id, pageIds: pages.map((page) => page.id), anchorId: pages[0].id })
     return true
   }
 
@@ -1777,7 +1804,7 @@ export default function BoardCanvas({ boardId, saveRef }: {
       if (target instanceof HTMLElement && (target.isContentEditable || target.closest('input, textarea, select'))) return
       event.preventDefault()
       if (selectedFramePage) {
-        deleteFramePage(selectedFramePage.frameId, selectedFramePage.pageId)
+        deleteFramePages(selectedFramePage.frameId, selectedFramePage.pageIds)
         return
       }
       setImages((current) => current.filter((image) => image.id !== selectedImageId))
@@ -2430,11 +2457,17 @@ export default function BoardCanvas({ boardId, saveRef }: {
           if (!objectId) return
           event.preventDefault()
           const pageId = target.closest<HTMLElement>('[data-board-page-id]')?.dataset.boardPageId
+            ?? (selectedFramePage?.frameId === objectId
+              && target.closest('.board-image__page-group, .board-image__page-group-move')
+              ? selectedFramePage.pageIds[0] : undefined)
           if (objectKind === 'text') selectText(objectId)
           else if (objectKind === 'sticker') selectSticker(objectId)
           else if (objectKind === 'drawing') selectDrawing(objectId)
           else if (objectKind === 'image') {
-            if (pageId) selectFramePage(objectId, pageId)
+            if (pageId) {
+              if (selectedFramePage?.frameId !== objectId || !selectedFramePage.pageIds.includes(pageId))
+                selectFramePage(objectId, pageId)
+            }
             else selectImage(objectId)
           }
           else if (objectKind === 'table') selectTable(objectId)
@@ -2485,7 +2518,7 @@ export default function BoardCanvas({ boardId, saveRef }: {
           onSelect={selectDrawing} onChange={changeDrawing} />)}
         {images.map((image) => <BoardImage key={image.id} item={image}
           selected={selectedImageId === image.id || multiSelectedIds.includes(image.id)}
-          selectedPageId={selectedFramePage?.frameId === image.id ? selectedFramePage.pageId : null}
+          selectedPageIds={selectedFramePage?.frameId === image.id ? selectedFramePage.pageIds : []}
           groupSelected={multiSelectedIds.includes(image.id)}
           interactive={navigationMode === 'cursor' && !drawingStyle}
           scale={viewState.scale} layer={objectLayers.get(image.id) ?? 1}
@@ -2610,11 +2643,13 @@ export default function BoardCanvas({ boardId, saveRef }: {
             const payload = selectedFramePageClipboard()
             setBoardContextMenu(null)
             if (payload) writeFramePageClipboard(payload)
-          }}><span>Копировать страницу</span><span className="board-context-menu__shortcut">Ctrl+C</span></button>
+          }}><span>Копировать</span><span className="board-context-menu__shortcut">Ctrl+C</span></button>
           <button type="button" role="menuitem" onClick={() => {
-            deleteFramePage(boardContextMenu.objectId!, boardContextMenu.pageId!)
+            deleteFramePages(boardContextMenu.objectId!, selectedFramePage?.frameId === boardContextMenu.objectId
+              && selectedFramePage?.pageIds.includes(boardContextMenu.pageId!)
+              ? selectedFramePage.pageIds : [boardContextMenu.pageId!])
             setBoardContextMenu(null)
-          }}><span>Удалить страницу</span><span className="board-context-menu__shortcut">Delete</span></button>
+          }}><span>Удалить</span><span className="board-context-menu__shortcut">Delete</span></button>
         </> : boardContextMenu.objectKind && boardContextMenu.objectId ? <>
           {boardContextMenu.objectKind !== 'arrow' && boardContextMenu.objectKind !== 'table' && <button type="button" role="menuitem" onClick={() => {
             const payload = selectedObjectClipboard()
@@ -2658,7 +2693,7 @@ export default function BoardCanvas({ boardId, saveRef }: {
           <button type="button" role="menuitem" disabled><span>Комментарий</span></button>
         </>}
       </div>}
-      <ToolPanel resetToCursorToken={resetToCursorToken} boardScale={viewState?.scale ?? 1} onPdfFile={addPdfFile} onNavigationModeChange={(mode) => {
+      <ToolPanel resetToCursorToken={resetToCursorToken} boardScale={viewState?.scale ?? 1} onDocumentFile={addDocumentFile} onNavigationModeChange={(mode) => {
         navigationModeRef.current = mode
         setNavigationMode(mode)
         if (mode === 'hand') {

@@ -241,7 +241,7 @@ export default function App() {
       <nav className="home-screen__sidebar-nav" aria-label="Разделы досок">
         <button className="home-screen__all-boards" type="button"
           aria-current={selectedFolderId === null ? 'page' : undefined}
-          onClick={() => setSelectedFolderId(null)}>Все доски</button>
+          onClick={() => setSelectedFolderId(null)}>Публичные доски</button>
         <div className="home-screen__folders-row">
           <button className="home-screen__folders" type="button" aria-expanded={foldersActive}
             aria-controls="home-screen-folder-list"

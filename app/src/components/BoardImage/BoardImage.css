@@ -4,18 +4,38 @@
 .board-image > img.board-image__content { display: block; width: 100%; height: 100%; pointer-events: none; user-select: none; }
 .board-image__body { position: absolute; inset: 0; width: 100%; height: 100%; padding: 0; border: 0;
   background: transparent; cursor: move; touch-action: none; }
-.board-image--frame .board-image__body { cursor: default; }
+.board-image--frame .board-image__body { cursor: move; }
 .board-image__page { position: absolute; z-index: 2; display: block; padding: 0; overflow: hidden;
   border: 0; background: #fff; cursor: grab; touch-action: none; }
 .board-image__page:active { cursor: grabbing; }
 .board-image__page--selected { z-index: 3; outline: 2px solid #0057ff; outline-offset: -2px; }
 .board-image__page:disabled { cursor: default; }
 .board-image__page img { display: block; width: 100%; height: 100%; pointer-events: none; user-select: none; }
+.board-image__page-group-move { position: absolute; z-index: 1; display: block; padding: 0;
+  border: 0; background: transparent; cursor: move; touch-action: none; }
+.board-image__page-group { position: absolute; z-index: 4; box-sizing: border-box;
+  border: 1px solid #0057ff; pointer-events: none; }
+.board-image__page-group > .text-box__handle { pointer-events: auto; }
+.board-image__page-handles { position: absolute; z-index: 4; pointer-events: none; }
+.board-image__page-handles > .text-box__handle { pointer-events: auto; }
 .board-image > .text-box__handle { z-index: 2; }
-.board-image__move { position: absolute; z-index: 3; left: 0; top: -40px; display: grid;
+.board-image > .text-box__handle,
+.board-image__page-group > .text-box__handle,
+.board-image__page-handles > .text-box__handle { transform-origin: center; }
+.board-image .text-box__handle--top-left { top: -10px; left: -10px; }
+.board-image .text-box__handle--top-right { top: -10px; right: -10px; }
+.board-image .text-box__handle--bottom-left { bottom: -10px; left: -10px; }
+.board-image .text-box__handle--bottom-right { bottom: -10px; right: -10px; }
+.board-image .text-box__handle .board-handle-dot { top: 50%; left: 50%; }
+.board-image__move { position: absolute; z-index: 3; display: grid;
   place-items: center; width: 32px; height: 32px; padding: 0; border: 0; border-radius: 10px;
   background: var(--control-background); box-shadow: var(--control-shadow); cursor: move;
-  touch-action: none; transform: scale(var(--table-control-scale)); transform-origin: left bottom; }
+  touch-action: none; transform: scale(var(--table-control-scale)); }
+.board-image__move--top { left: 0; top: -40px; transform-origin: left bottom; }
+.board-image__move--right { left: calc(100% + 8px); top: 0; transform-origin: left top; }
+.board-image__move--left { right: calc(100% + 8px); top: 0; transform-origin: right top; }
+.board-image__move--bottom { left: 0; top: calc(100% + 8px); transform-origin: left top; }
+.board-image__move--inside { left: 0; top: 0; transform-origin: left top; }
 .board-image__move img { display: block; width: 18px; height: 18px; pointer-events: none; }
 .board-image__move:hover { background: var(--control-hover); }
 .board-image__move:focus-visible { outline: 2px solid #a7b1be; outline-offset: 2px; }

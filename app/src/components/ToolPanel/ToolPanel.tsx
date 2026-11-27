@@ -6,7 +6,7 @@ import stickerIcon from './icons/sticker-outline.svg'
 import penIcon from '../../../../assets/pen.png'
 import tableIcon from '../../../../assets/table.png'
 import { TEXT_COLORS } from '../TextToolbar/TextToolbar'
-import type { PdfImportMode } from '../../pdfImport'
+import type { DocumentImportMode } from '../../documentImport'
 import './ToolPanel.css'
 
 export type NavigationMode = 'cursor' | 'hand'
@@ -58,17 +58,17 @@ type ToolPanelProps = {
   onStickerToolChange: (sticker: StickerStyle | null) => void
   onDrawingToolChange: (style: DrawingStyle | null) => void
   onTableToolChange: (size: TableSize | null) => void
-  onPdfFile: (file: File, mode: PdfImportMode) => Promise<void>
+  onDocumentFile: (file: File, mode: DocumentImportMode) => Promise<void>
   onNavigationModeChange: (mode: NavigationMode) => void
   resetToCursorToken: number
   boardScale: number
 }
 
-export default function ToolPanel({ onTextToolChange, onStickerToolChange, onDrawingToolChange, onTableToolChange, onPdfFile,
+export default function ToolPanel({ onTextToolChange, onStickerToolChange, onDrawingToolChange, onTableToolChange, onDocumentFile,
   onNavigationModeChange, resetToCursorToken, boardScale }: ToolPanelProps) {
   const rootRef = useRef<HTMLDivElement>(null)
   const pdfInputRef = useRef<HTMLInputElement>(null)
-  const pdfModeRef = useRef<PdfImportMode>('split')
+  const pdfModeRef = useRef<DocumentImportMode>('split')
   const dragPreviewRef = useRef<HTMLDivElement | null>(null)
   const [navigationMode, setNavigationMode] = useState<NavigationMode>('cursor')
   const [drawingPresets, setDrawingPresets] = useState(INITIAL_DRAWING_PRESETS)
@@ -219,7 +219,7 @@ export default function ToolPanel({ onTextToolChange, onStickerToolChange, onDra
             onTableToolChange(null)
           }}><Icon name="table" /></button>
         <div className="tool-panel__pdf-anchor">
-          <button className="tool-panel__button" type="button" aria-label="Добавить PDF" title="Добавить PDF"
+          <button className="tool-panel__button" type="button" aria-label="Добавить файл" title="Добавить файл"
             aria-expanded={openMenu === 'pdf'} aria-controls="pdf-import-modes"
             disabled={pdfImporting} aria-busy={pdfImporting}
             onClick={() => setOpenMenu(openMenu === 'pdf' ? null : 'pdf')}>
@@ -229,7 +229,7 @@ export default function ToolPanel({ onTextToolChange, onStickerToolChange, onDra
             </svg>
           </button>
           {openMenu === 'pdf' && <div id="pdf-import-modes" className="tool-panel__pdf-menu"
-            role="group" aria-label="Способ добавления PDF">
+            role="group" aria-label="Способ добавления файла">
             {([['split', 'С разбитием'], ['frame', 'В одном фрейме']] as const).map(([mode, label]) =>
               <button key={mode} type="button" onClick={() => {
                 pdfModeRef.current = mode
@@ -238,7 +238,8 @@ export default function ToolPanel({ onTextToolChange, onStickerToolChange, onDra
               }}>{label}</button>)}
           </div>}
         </div>
-        <input ref={pdfInputRef} className="tool-panel__file-input" type="file" accept=".pdf,application/pdf"
+        <input ref={pdfInputRef} className="tool-panel__file-input" type="file"
+          accept=".pdf,application/pdf"
           aria-label="Выбрать PDF" onChange={(event) => {
             const file = event.currentTarget.files?.[0]
             event.currentTarget.value = ''
@@ -257,15 +258,15 @@ export default function ToolPanel({ onTextToolChange, onStickerToolChange, onDra
             onStickerToolChange(null)
             onDrawingToolChange(null)
             onTableToolChange(null)
-            void onPdfFile(file, pdfModeRef.current).catch((error) => {
-              console.error('Не удалось добавить PDF', error)
-              setPdfError({ message: error instanceof Error && error.name === 'PdfPageLimitError'
+            void onDocumentFile(file, pdfModeRef.current).catch((error) => {
+              console.error('Не удалось добавить файл', error)
+              setPdfError({ message: error instanceof Error && error.name === 'DocumentPageLimitError'
                 ? error.message : 'Не удалось открыть PDF. Проверьте файл и повторите попытку.' })
             }).finally(() => setPdfImporting(false))
           }} />
       </div>
       {pdfImporting && createPortal(
-        <div className="tool-panel__pdf-status" role="status">Добавляю страницы PDF…</div>, document.body)}
+        <div className="tool-panel__pdf-status" role="status">Добавляю файл…</div>, document.body)}
       {pdfError && createPortal(
         <div className="tool-panel__pdf-error" role="alert">{pdfError.message}</div>, document.body)}
 

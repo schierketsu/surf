@@ -61,30 +61,45 @@ export async function renderBoardPreview(board: BoardContent) {
 
   const objects = new Map<string, () => void>()
   const previewImages = board.images ?? []
+  const documentColor = (name?: string) => /\.pdf(?:\s+—\s+страница\s+\d+)?$/i.test(name ?? '') ? '#dc2626' : null
+  const drawDocumentPage = (x: number, y: number, width: number, height: number, color: string) => {
+    context.fillStyle = '#fff'
+    context.fillRect(x, y, width, height)
+    context.strokeStyle = color
+    context.lineWidth = 9
+    context.strokeRect(x, y, width, height)
+  }
   const loadImage = (src: string) => new Promise<HTMLImageElement | null>((resolve) => {
     const image = new Image()
     image.onload = () => resolve(image)
     image.onerror = () => resolve(null)
     image.src = src
   })
-  const loadedImages = await Promise.all(previewImages.map((item) =>
-    Promise.all((item.framePages?.map((page) => page.src) ?? [item.src]).map(loadImage))))
+  const loadedImages = await Promise.all(previewImages.map((item) => documentColor(item.name)
+    ? Promise.resolve([]) : Promise.all((item.framePages?.map((page) => page.src) ?? [item.src]).map(loadImage))))
   previewImages.forEach((item, index) => objects.set(item.id, () => {
+    const color = documentColor(item.name)
     if (item.frame) {
       context.fillStyle = '#fff'
       context.fillRect(item.x, item.y, item.width, item.height)
     }
     if (item.framePages) item.framePages.forEach((page, pageIndex) => {
-      const image = loadedImages[index][pageIndex]
-      if (image) context.drawImage(image, item.x + page.x, item.y + page.y, page.width, page.height)
+      if (color) drawDocumentPage(item.x + page.x, item.y + page.y, page.width, page.height, color)
+      else {
+        const image = loadedImages[index][pageIndex]
+        if (image) context.drawImage(image, item.x + page.x, item.y + page.y, page.width, page.height)
+      }
     })
     else {
-      const image = loadedImages[index][0]
-      if (image) context.drawImage(image, item.x, item.y, item.width, item.height)
+      if (color) drawDocumentPage(item.x, item.y, item.width, item.height, color)
+      else {
+        const image = loadedImages[index][0]
+        if (image) context.drawImage(image, item.x, item.y, item.width, item.height)
+      }
     }
     if (item.frame) {
-      context.strokeStyle = '#a9b3bf'
-      context.lineWidth = 1
+      context.strokeStyle = color ?? '#a9b3bf'
+      context.lineWidth = color ? 9 : 1
       context.strokeRect(item.x, item.y, item.width, item.height)
     }
   }))
