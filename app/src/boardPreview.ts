@@ -61,15 +61,32 @@ export async function renderBoardPreview(board: BoardContent) {
 
   const objects = new Map<string, () => void>()
   const previewImages = board.images ?? []
-  const loadedImages = await Promise.all(previewImages.map((item) => new Promise<HTMLImageElement | null>((resolve) => {
+  const loadImage = (src: string) => new Promise<HTMLImageElement | null>((resolve) => {
     const image = new Image()
     image.onload = () => resolve(image)
     image.onerror = () => resolve(null)
-    image.src = item.src
-  })))
+    image.src = src
+  })
+  const loadedImages = await Promise.all(previewImages.map((item) =>
+    Promise.all((item.framePages?.map((page) => page.src) ?? [item.src]).map(loadImage))))
   previewImages.forEach((item, index) => objects.set(item.id, () => {
-    const image = loadedImages[index]
-    if (image) context.drawImage(image, item.x, item.y, item.width, item.height)
+    if (item.frame) {
+      context.fillStyle = '#fff'
+      context.fillRect(item.x, item.y, item.width, item.height)
+    }
+    if (item.framePages) item.framePages.forEach((page, pageIndex) => {
+      const image = loadedImages[index][pageIndex]
+      if (image) context.drawImage(image, item.x + page.x, item.y + page.y, page.width, page.height)
+    })
+    else {
+      const image = loadedImages[index][0]
+      if (image) context.drawImage(image, item.x, item.y, item.width, item.height)
+    }
+    if (item.frame) {
+      context.strokeStyle = '#a9b3bf'
+      context.lineWidth = 1
+      context.strokeRect(item.x, item.y, item.width, item.height)
+    }
   }))
   for (const item of board.texts) objects.set(item.id, () => {
     context.save()

@@ -58,6 +58,7 @@
 }
 
 .home-screen__folders:hover { background: var(--control-hover); }
+.home-screen__folders-icon { display: block; flex: none; width: 20px; height: 20px; }
 .home-screen__folders:focus-visible { outline: 2px solid #596573; outline-offset: 2px; }
 .home-screen__folders .home-screen__filter-arrow { transform: rotate(135deg); transition: transform 140ms ease; }
 .home-screen__folders[aria-expanded="true"] .home-screen__filter-arrow { transform: rotate(225deg); }
@@ -151,9 +152,11 @@
   cursor: pointer;
 }
 
+.home-screen__folder-item[aria-current="page"] { background: var(--canvas-background); }
+
 .home-screen__folder-row { position: relative; }
-.home-screen__folder-row:has(> .home-screen__folder-item:hover) > .home-screen__folder-item,
-.home-screen__folder-row:has(> .home-screen__folder-menu-button:hover) > .home-screen__folder-item {
+.home-screen__folder-row:has(> .home-screen__folder-item:hover) > .home-screen__folder-item:not([aria-current="page"]),
+.home-screen__folder-row:has(> .home-screen__folder-menu-button:hover) > .home-screen__folder-item:not([aria-current="page"]) {
   background: var(--control-hover);
 }
 .home-screen__folder-row--menu-open { z-index: 5; }

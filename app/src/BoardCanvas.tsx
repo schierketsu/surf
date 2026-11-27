@@ -15,7 +15,8 @@ import Sticker, { type StickerItem } from './components/Sticker/Sticker'
 import StickerToolbar from './components/StickerToolbar/StickerToolbar'
 import Drawing, { drawingPath, type DrawingItem } from './components/Drawing/Drawing'
 import DrawingToolbar from './components/DrawingToolbar/DrawingToolbar'
-import BoardImage, { type BoardImageItem } from './components/BoardImage/BoardImage'
+import BoardImage, { type BoardImageItem, type PdfFramePage } from './components/BoardImage/BoardImage'
+import type { PdfImportMode } from './pdfImport'
 import type { LayerAction } from './components/LayerMenuItems'
 import { loadBoard, saveBoard, type SavedBoard } from './boardStorage'
 import { renderBoardPreview } from './boardPreview'
@@ -24,7 +25,7 @@ import { boardObjectIds, normalizeLayerOrder } from './boardLayers'
 type View = { scale: number; x: number; y: number }
 type SelectionRect = { left: number; top: number; width: number; height: number }
 type BoardObjectKind = 'text' | 'sticker' | 'drawing' | 'arrow' | 'table' | 'image'
-type BoardContextMenu = { x: number; y: number; objectKind?: BoardObjectKind; objectId?: string }
+type BoardContextMenu = { x: number; y: number; objectKind?: BoardObjectKind; objectId?: string; pageId?: string }
 type FormatCommand = 'bold' | 'italic' | 'underline' | 'strikeThrough'
 type DrawingDraft = DrawingStyle & { points: Point[] }
 type GroupTransformSnapshot = { texts: TextItem[]; stickers: StickerItem[]; tables: TableItem[]; drawings: DrawingItem[]; images: BoardImageItem[]; arrows: Arrow[] }
@@ -39,8 +40,11 @@ const VISIBLE_EDGE_GAP = 8
 const ARROW_DRAG_THRESHOLD = 6
 const OBJECT_CLIPBOARD_TYPE = 'application/x-doska-objects+json'
 const OBJECT_CLIPBOARD_PREFIX = 'DOSKA_OBJECTS_V1:'
+const FRAME_PAGE_CLIPBOARD_TYPE = 'application/x-doska-frame-page+json'
+const FRAME_PAGE_CLIPBOARD_PREFIX = 'DOSKA_FRAME_PAGE_V1:'
 
 type ObjectClipboard = { version: 1; texts: TextItem[]; stickers: StickerItem[]; tables: TableItem[]; arrows: Arrow[]; drawings: DrawingItem[]; images: BoardImageItem[] }
+type FramePageClipboard = { version: 1; frameId: string; page: PdfFramePage }
 function occupiedConnectorKeys(items: Arrow[], exceptArrowId?: string) {
   const occupied = new Set<string>()
   for (const arrow of items) {
@@ -60,6 +64,18 @@ function parseObjectClipboard(value: string): ObjectClipboard | null {
         drawings: Array.isArray(data.drawings) ? data.drawings : [],
         images: Array.isArray(data.images) ? data.images : [] } as ObjectClipboard
       : null
+  } catch { return null }
+}
+
+function parseFramePageClipboard(value: string): FramePageClipboard | null {
+  try {
+    const data = JSON.parse(value.startsWith(FRAME_PAGE_CLIPBOARD_PREFIX)
+      ? value.slice(FRAME_PAGE_CLIPBOARD_PREFIX.length) : value)
+    const page = data?.page
+    return data?.version === 1 && typeof data.frameId === 'string'
+      && typeof page?.id === 'string' && typeof page.src === 'string'
+      && ['x', 'y', 'width', 'height'].every((key) => Number.isFinite(page[key]))
+      ? data as FramePageClipboard : null
   } catch { return null }
 }
 
@@ -398,6 +414,7 @@ export default function BoardCanvas({ boardId, saveRef }: {
   const stickerSelectionRef = useRef<Range | null>(null)
   const pasteCountRef = useRef(0)
   const objectClipboardRef = useRef<ObjectClipboard | null>(null)
+  const framePageClipboardRef = useRef<FramePageClipboard | null>(null)
   const groupTransformStartRef = useRef<GroupTransformSnapshot | null>(null)
   const arrowGeometryCacheRef = useRef(new Map<string, {
     arrow: Arrow
@@ -419,6 +436,7 @@ export default function BoardCanvas({ boardId, saveRef }: {
   const [drawingDraft, setDrawingDraft] = useState<DrawingDraft | null>(null)
   const [selectedDrawingId, setSelectedDrawingId] = useState<string | null>(null)
   const [selectedImageId, setSelectedImageId] = useState<string | null>(null)
+  const [selectedFramePage, setSelectedFramePage] = useState<{ frameId: string; pageId: string } | null>(null)
   const [selectedStickerId, setSelectedStickerId] = useState<string | null>(null)
   const [editingStickerId, setEditingStickerId] = useState<string | null>(null)
   const [focusStickerId, setFocusStickerId] = useState<string | null>(null)
@@ -438,6 +456,10 @@ export default function BoardCanvas({ boardId, saveRef }: {
   const [snapAnchor, setSnapAnchor] = useState<Anchor | null>(null)
   const [loaded, setLoaded] = useState(false)
   const persistenceReadyRef = useRef(false)
+
+  useEffect(() => {
+    if (selectedFramePage && selectedImageId !== selectedFramePage.frameId) setSelectedFramePage(null)
+  }, [selectedFramePage, selectedImageId])
 
   useEffect(() => {
     let cancelled = false
@@ -551,7 +573,7 @@ export default function BoardCanvas({ boardId, saveRef }: {
     setMultiSelectedIds(added.length > 1 ? added.map((item) => item.id) : [])
   }
 
-  const addPdfFile = async (file: File) => {
+  const addPdfFile = async (file: File, mode: PdfImportMode) => {
     if (!file.name.toLowerCase().endsWith('.pdf') && file.type !== 'application/pdf') {
       throw new Error('Поддерживаются только PDF-файлы')
     }
@@ -561,7 +583,7 @@ export default function BoardCanvas({ boardId, saveRef }: {
     const center = { x: (board.clientWidth / 2 - view.x) / view.scale,
       y: (board.clientHeight / 2 - view.y) / view.scale }
     const { importPdfPages } = await import('./pdfImport')
-    const pages = await importPdfPages(file, center)
+    const pages = await importPdfPages(file, center, mode)
     if (!pages.length) throw new Error('В PDF нет страниц')
     setImages((current) => [...current, ...pages])
     placeNewObjectsOnTop(pages.map((page) => page.id))
@@ -896,7 +918,9 @@ export default function BoardCanvas({ boardId, saveRef }: {
     setImages((current) => current.map((item) => {
       const start = imageStarts.get(item.id)
       return start ? { ...item, ...scalePoint(start), width: start.width * factor,
-        height: start.height * factor } : item
+        height: start.height * factor,
+        framePages: start.framePages?.map((page) => ({ ...page, x: page.x * factor, y: page.y * factor,
+          width: page.width * factor, height: page.height * factor })) } : item
     }))
     setArrows((current) => current.map((item) => {
       const start = arrowStarts.get(item.id)
@@ -1042,6 +1066,7 @@ export default function BoardCanvas({ boardId, saveRef }: {
 
   const selectImage = (id: string, additive = false) => {
     if (additive) { toggleObjectSelection(id); return }
+    setSelectedFramePage(null)
     clearTextSelection()
     setSelectedId(null)
     setSelectedStickerId(null)
@@ -1057,6 +1082,17 @@ export default function BoardCanvas({ boardId, saveRef }: {
 
   const changeImage = (id: string, changes: Partial<BoardImageItem>) => {
     setImages((current) => current.map((image) => image.id === id ? { ...image, ...changes } : image))
+  }
+
+  const selectFramePage = (frameId: string, pageId: string) => {
+    selectImage(frameId)
+    setSelectedFramePage({ frameId, pageId })
+  }
+
+  const deleteFramePage = (frameId: string, pageId: string) => {
+    setImages((current) => current.map((image) => image.id === frameId
+      ? { ...image, framePages: image.framePages?.filter((page) => page.id !== pageId) } : image))
+    setSelectedFramePage(null)
   }
 
   const changeDrawingStrokeWidth = (id: string, width: number) => {
@@ -1400,6 +1436,7 @@ export default function BoardCanvas({ boardId, saveRef }: {
   }
 
   const selectedObjectClipboard = (): ObjectClipboard | null => {
+    if (selectedFramePage) return null
     if (selectedArrowId) return null
     if (selectedImageId) {
       const image = images.find((item) => item.id === selectedImageId)
@@ -1462,6 +1499,45 @@ export default function BoardCanvas({ boardId, saveRef }: {
     const copied = document.execCommand('copy')
     document.removeEventListener('copy', copy, true)
     if (!copied) void navigator.clipboard?.writeText(OBJECT_CLIPBOARD_PREFIX + json).catch(() => {})
+  }
+
+  const selectedFramePageClipboard = (): FramePageClipboard | null => {
+    if (!selectedFramePage) return null
+    const page = images.find((image) => image.id === selectedFramePage.frameId)?.framePages
+      ?.find((item) => item.id === selectedFramePage.pageId)
+    return page ? { version: 1, frameId: selectedFramePage.frameId, page: { ...page } } : null
+  }
+
+  const writeFramePageClipboard = (payload: FramePageClipboard) => {
+    framePageClipboardRef.current = payload
+    const json = JSON.stringify(payload)
+    const copy = (event: ClipboardEvent) => {
+      event.preventDefault()
+      event.clipboardData?.setData(FRAME_PAGE_CLIPBOARD_TYPE, json)
+      event.clipboardData?.setData('text/plain', FRAME_PAGE_CLIPBOARD_PREFIX + json)
+    }
+    document.addEventListener('copy', copy, { capture: true, once: true })
+    const copied = document.execCommand('copy')
+    document.removeEventListener('copy', copy, true)
+    if (!copied) void navigator.clipboard?.writeText(FRAME_PAGE_CLIPBOARD_PREFIX + json).catch(() => {})
+  }
+
+  const pasteFramePage = (payload: FramePageClipboard) => {
+    const frameId = selectedFramePage?.frameId ?? (images.some((image) =>
+      image.id === selectedImageId && image.framePages) ? selectedImageId : payload.frameId)
+    const frame = images.find((image) => image.id === frameId && image.framePages)
+    if (!frame || !frame.framePages) return false
+    const source = payload.page
+    const maxX = Math.max(0, frame.width - source.width)
+    const maxY = Math.max(0, frame.height - source.height)
+    const page = { ...source, id: crypto.randomUUID(),
+      x: Math.max(0, Math.min(maxX, source.x + (source.x + 24 <= maxX ? 24 : -24))),
+      y: Math.max(0, Math.min(maxY, source.y + (source.y + 24 <= maxY ? 24 : -24))) }
+    setImages((current) => current.map((image) => image.id === frame.id
+      ? { ...image, framePages: [...(image.framePages ?? []), page] } : image))
+    setSelectedImageId(frame.id)
+    setSelectedFramePage({ frameId: frame.id, pageId: page.id })
+    return true
   }
 
   const pasteObjects = (payload: ObjectClipboard) => {
@@ -1533,6 +1609,15 @@ export default function BoardCanvas({ boardId, saveRef }: {
       const readOnlyTableCell = event.target instanceof HTMLTextAreaElement
         && event.target.classList.contains('board-table__cell') && event.target.readOnly
       if (event.defaultPrevented || (editableTarget(event.target) && !readOnlyTableCell) || navigationMode !== 'cursor') return
+      if (selectedFramePage) {
+        const payload = selectedFramePageClipboard()
+        if (!payload) return
+        framePageClipboardRef.current = payload
+        event.preventDefault()
+        event.clipboardData?.setData(FRAME_PAGE_CLIPBOARD_TYPE, JSON.stringify(payload))
+        event.clipboardData?.setData('text/plain', FRAME_PAGE_CLIPBOARD_PREFIX + JSON.stringify(payload))
+        return
+      }
       if (selectedTableId) {
         const table = tables.find((item) => item.id === selectedTableId)
         if (!table) return
@@ -1563,6 +1648,14 @@ export default function BoardCanvas({ boardId, saveRef }: {
       const readOnlyTableCell = event.target instanceof HTMLTextAreaElement
         && event.target.classList.contains('board-table__cell') && event.target.readOnly
       if (event.defaultPrevented || (editableTarget(event.target) && !readOnlyTableCell) || navigationMode !== 'cursor') return
+      const framePageValue = event.clipboardData?.getData(FRAME_PAGE_CLIPBOARD_TYPE)
+        || event.clipboardData?.getData('text/plain')
+      const framePage = framePageValue ? parseFramePageClipboard(framePageValue) : null
+      if (framePage && pasteFramePage(framePage)) {
+        event.preventDefault()
+        framePageClipboardRef.current = framePage
+        return
+      }
       const custom = event.clipboardData?.getData(OBJECT_CLIPBOARD_TYPE)
       const plain = event.clipboardData?.getData('text/plain')
       const payload = custom ? parseObjectClipboard(custom)
@@ -1586,7 +1679,8 @@ export default function BoardCanvas({ boardId, saveRef }: {
     window.addEventListener('paste', onPaste)
     return () => { window.removeEventListener('copy', onCopy); window.removeEventListener('paste', onPaste) }
   }, [texts, stickers, tables, arrows, drawings, images, selectedId, multiSelectedIds, selectedStickerId,
-    selectedTableId, selectedTableCells, selectedArrowId, selectedDrawingId, selectedImageId, navigationMode])
+    selectedTableId, selectedTableCells, selectedArrowId, selectedDrawingId, selectedImageId,
+    selectedFramePage, navigationMode])
 
   useEffect(() => {
     if (!boardContextMenu) return
@@ -1673,17 +1767,25 @@ export default function BoardCanvas({ boardId, saveRef }: {
   useEffect(() => {
     if (!selectedImageId || navigationMode !== 'cursor') return
     const onImageKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') { setSelectedImageId(null); return }
+      if (event.key === 'Escape') {
+        if (selectedFramePage) setSelectedFramePage(null)
+        else setSelectedImageId(null)
+        return
+      }
       if (event.key !== 'Delete' || event.defaultPrevented) return
       const target = event.target
       if (target instanceof HTMLElement && (target.isContentEditable || target.closest('input, textarea, select'))) return
       event.preventDefault()
+      if (selectedFramePage) {
+        deleteFramePage(selectedFramePage.frameId, selectedFramePage.pageId)
+        return
+      }
       setImages((current) => current.filter((image) => image.id !== selectedImageId))
       setSelectedImageId(null)
     }
     window.addEventListener('keydown', onImageKey)
     return () => window.removeEventListener('keydown', onImageKey)
-  }, [selectedImageId, navigationMode])
+  }, [selectedImageId, selectedFramePage, navigationMode])
 
   useEffect(() => {
     if (!selectedTableId || navigationMode !== 'cursor') return
@@ -2327,13 +2429,17 @@ export default function BoardCanvas({ boardId, saveRef }: {
           const objectId = object.dataset.boardObjectId
           if (!objectId) return
           event.preventDefault()
+          const pageId = target.closest<HTMLElement>('[data-board-page-id]')?.dataset.boardPageId
           if (objectKind === 'text') selectText(objectId)
           else if (objectKind === 'sticker') selectSticker(objectId)
           else if (objectKind === 'drawing') selectDrawing(objectId)
-          else if (objectKind === 'image') selectImage(objectId)
+          else if (objectKind === 'image') {
+            if (pageId) selectFramePage(objectId, pageId)
+            else selectImage(objectId)
+          }
           else if (objectKind === 'table') selectTable(objectId)
           else selectArrow(objectId)
-          setBoardContextMenu({ x: event.clientX, y: event.clientY, objectKind, objectId })
+          setBoardContextMenu({ x: event.clientX, y: event.clientY, objectKind, objectId, pageId })
           return
         }
         if (target.closest('button, input, textarea, select, [contenteditable="true"], .board-arrow-handles')) return
@@ -2379,10 +2485,11 @@ export default function BoardCanvas({ boardId, saveRef }: {
           onSelect={selectDrawing} onChange={changeDrawing} />)}
         {images.map((image) => <BoardImage key={image.id} item={image}
           selected={selectedImageId === image.id || multiSelectedIds.includes(image.id)}
+          selectedPageId={selectedFramePage?.frameId === image.id ? selectedFramePage.pageId : null}
           groupSelected={multiSelectedIds.includes(image.id)}
           interactive={navigationMode === 'cursor' && !drawingStyle}
           scale={viewState.scale} layer={objectLayers.get(image.id) ?? 1}
-          onSelect={selectImage} onChange={changeImage} />)}
+          onSelect={selectImage} onPageSelect={selectFramePage} onChange={changeImage} />)}
         {drawingDraft && <svg className="board-drawing-preview" style={{ zIndex: orderedObjectIds.length + 2 }} width={BOARD_WIDTH} height={BOARD_HEIGHT}
           viewBox={`0 0 ${BOARD_WIDTH} ${BOARD_HEIGHT}`} aria-hidden="true">
           <path d={drawingPath(drawingDraft.points)} fill="none" stroke={drawingDraft.color}
@@ -2495,9 +2602,20 @@ export default function BoardCanvas({ boardId, saveRef }: {
       {boardContextMenu && <div className="board-context-menu" role="menu" aria-label="Меню холста"
         style={{ left: Math.max(8, Math.min(window.innerWidth - 226, boardContextMenu.x)),
           top: Math.max(8, Math.min(window.innerHeight
-            - (boardContextMenu.objectKind === 'arrow' ? 138 : boardContextMenu.objectKind ? 174 : 102), boardContextMenu.y)) }}
+            - (boardContextMenu.pageId ? 102 : boardContextMenu.objectKind === 'arrow' ? 138
+              : boardContextMenu.objectKind ? 174 : 102), boardContextMenu.y)) }}
         onPointerDown={(event) => event.stopPropagation()} onContextMenu={(event) => event.preventDefault()}>
-        {boardContextMenu.objectKind && boardContextMenu.objectId ? <>
+        {boardContextMenu.pageId && boardContextMenu.objectId ? <>
+          <button type="button" role="menuitem" onClick={() => {
+            const payload = selectedFramePageClipboard()
+            setBoardContextMenu(null)
+            if (payload) writeFramePageClipboard(payload)
+          }}><span>Копировать страницу</span><span className="board-context-menu__shortcut">Ctrl+C</span></button>
+          <button type="button" role="menuitem" onClick={() => {
+            deleteFramePage(boardContextMenu.objectId!, boardContextMenu.pageId!)
+            setBoardContextMenu(null)
+          }}><span>Удалить страницу</span><span className="board-context-menu__shortcut">Delete</span></button>
+        </> : boardContextMenu.objectKind && boardContextMenu.objectId ? <>
           {boardContextMenu.objectKind !== 'arrow' && boardContextMenu.objectKind !== 'table' && <button type="button" role="menuitem" onClick={() => {
             const payload = selectedObjectClipboard()
             setBoardContextMenu(null)
@@ -2530,8 +2648,10 @@ export default function BoardCanvas({ boardId, saveRef }: {
           }}><span>Удалить</span><span className="board-context-menu__shortcut">Delete</span></button>
         </> : <>
           <button type="button" role="menuitem" onClick={() => {
+            const framePage = framePageClipboardRef.current
             const payload = objectClipboardRef.current
             setBoardContextMenu(null)
+            if (framePage && pasteFramePage(framePage)) return
             if (payload) pasteObjects(payload)
           }}><span>Вставить</span><span className="board-context-menu__shortcut">Ctrl+V</span></button>
           <span className="board-context-menu__divider" aria-hidden="true" />
